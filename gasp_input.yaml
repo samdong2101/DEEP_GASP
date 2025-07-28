@@ -1,0 +1,51 @@
+CompositionSpace:
+    - Al
+    - Cu
+    - Zr
+
+EnergyCode:
+    lammps:
+      input_script: /blue/hennig/sam.dong/gasp/input_files/Zr_Cu_Al_lammps_input2
+
+Geometry:
+    shape: bulk
+
+NumCalcsAtOnce: 5
+InitialPopulation:
+  generative:
+    input_script: /blue/hennig/sam.dong/SMART_gasp/GASP-python/smart_gasp/WGANsg/input.json
+  from_files:
+    path_to_folder: /blue/hennig/sam.dong/SMART_gasp/GASP-python/endpoints
+Pool:
+    size: 25
+Selection:
+    num_parents: 25
+    power: 1
+
+
+Development:
+    niggli: False
+    scale_density: False
+
+Constraints:
+    min_num_atoms: 2
+    max_num_atoms: 12
+    allow_endpoints: False
+    allow_binary: True
+
+StoppingCriteria:
+    num_energy_calcs: 500
+
+
+job_specs:
+    cores: 2
+    memory: '16GB'
+    project: 'hennig'
+    queue: 'hpg-default'
+    walltime: '96:00:00'
+    interface: 'ibs1'
+    job_extra:
+        - '--ntasks=4'
+        - '--nodes=1'
+        - '--qos=hennig'
+
