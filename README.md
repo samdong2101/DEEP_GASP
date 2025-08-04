@@ -12,7 +12,7 @@ for population initialization and tournament based scoring/selection (TBS) of ca
 - ```bash conda create -n smart_gasp python=3.10 -y```
 
 ### Activate the environment
-```conda activate smart_gasp```
+- ```conda activate smart_gasp```
 
 # Install required packages
 pip install -r requirements.txt
