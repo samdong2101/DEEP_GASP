@@ -1,3 +1,21 @@
+# coding: utf-8
+# Copyright(c) Henniggroup.
+# Distributed under the terms of the MIT License.
+
+from __future__ import division, unicode_literals, print_function
+
+"""
+Population module:
+
+This module contains classes used to hold the population of organisms.
+
+1. InitialPopulation: represents the initial population of organisms,
+        produced from one or more of the organism creators
+
+2. Pool: represents the population of organisms, after the initial population
+
+"""
+
 from pymatgen.analysis.phase_diagram import PDEntry
 from pymatgen.analysis.phase_diagram import CompoundPhaseDiagram
 import json
@@ -60,11 +78,14 @@ class InitialPopulation():
 
             composition_space: the CompositionSpace of the search
         """
-
+        try:
+            os.mkdir(os.getcwd() + '/initial_population')
+        except:
+            pass
         new_org.cell.sort()
-        new_org.cell.to('poscar', os.getcwd() + '/POSCAR.' +
-                        str(new_org.id))
-        print('Replacing organism {} with organism {} in the initial '
+        new_org.cell.to(fmt = 'poscar', filename = os.getcwd() +'/initial_population' + '/POSCAR.' +
+                                str(new_org.id))
+        print('     ---> Replacing organism {} with organism {} in the initial '
               'population'.format(old_org.id, new_org.id))
 
         # remove the redundant organism and add the new one
@@ -90,7 +111,6 @@ class InitialPopulation():
         elif composition_space.objective_function == 'pd':
             return self.get_convex_hull_area(composition_space)
 
-
     def get_best_epa(self):
         """
         Returns the epa of the best organism in the initial population.
@@ -115,26 +135,18 @@ class InitialPopulation():
 
             # compute and print the area or volume of the convex hull
             pdentries = []
-
+            
             for organism in self.initial_population:
-                #print('organism energy:',organism.total_energy)
-
                 out = PDEntry(organism.composition,
                             organism.total_energy)
-                    #print('population.py line 137:', out)
-                    #print('population.py line 138:', type(out))
+
                 pdentries.append(PDEntry(organism.composition,
                     organism.total_energy))
-                    #print('population.py line 143:',pdentries)
-                #except:
-                    #pass #print('energy not yet calculated')
 
-            #print('population.py line 136:', pdentries)
-            #print(pdentries)
             try:
                 compound_pd = CompoundPhaseDiagram(pdentries,
                         composition_space.endpoints)
-
+   
             # get the data for the convex hull
                 qhull_data = compound_pd.qhull_data
             # for some reason, the last point is positive, so remove it
@@ -175,6 +187,7 @@ class InitialPopulation():
             if not has_endpoint:
                 return False
         return True
+
     def has_non_endpoint(self, composition_space):
         """
         Checks that the initial population contains at least one organism not
@@ -196,6 +209,7 @@ class InitialPopulation():
             if not_endpoint:
                 return True
         return False
+
 
 class Pool(object):
     """
@@ -287,7 +301,7 @@ class Pool(object):
 
         organisms_list = [organism for organism in initial_population.initial_population if organism.total_energy!=None]
         print('length of initial_population:',len(initial_population.initial_population))
-
+            
 
         # check that the initial population contains at least three organisms
         if len(organisms_list) < 3:
@@ -306,7 +320,7 @@ class Pool(object):
             for i in range(len(organisms_list)):
                 if i < self.num_promoted:
                     self.promotion_set.append(organisms_list[i])
-
+                    
                 else:
                     self.queue.appendleft(organisms_list[i])
 
@@ -391,8 +405,6 @@ class Pool(object):
 
         elif composition_space.objective_function == 'pd':
             organisms_list = self.to_list()
-            print('     -----> len(organisms_list):',len(organisms_list))
-            print('     -----> len(self.promotion_set):',len(self.promotion_set))
             organisms_list.append(organism_to_add)
             self.compute_pd_values(organisms_list, composition_space)
             self.check_promotion_set_pd()
@@ -400,6 +412,7 @@ class Pool(object):
                 self.promotion_set.append(organism_to_add)
             else:
                 self.queue.appendleft(organism_to_add)
+    
     def get_worst_in_promotion_set(self):
         """
         Returns the organism in the promotion set with the worst (largest)
@@ -447,7 +460,6 @@ class Pool(object):
         for organism_to_promote in organisms_to_promote:
             self.queue.remove(organism_to_promote)
             self.promotion_set.append(organism_to_promote)
-        print('length organisms_to_demote:',len(organisms_to_demote))
 
     def replace_organism(self, old_org, new_org, composition_space):
         """
@@ -464,12 +476,15 @@ class Pool(object):
             composition_space: the CompositionSpace of the search
         """
 
-        print('Replacing organism {} with organism {} in the pool '.format(
+        print('     ---> Replacing organism {} with organism {} in the pool '.format(
             old_org.id, new_org.id))
-
+        try:
+            os.mkdir(os.getcwd() + '/initial_population')
+        except:
+            pass
         new_org.cell.sort()
-        new_org.cell.to('poscar', os.getcwd() + '/POSCAR.' + str(new_org.id))
-
+        new_org.cell.to(fmt = 'poscar', filename = os.getcwd() +'/offspring' + '/POSCAR.' +
+                                str(new_org.id))
         # set new objective function value
         if composition_space.objective_function == 'epa':
             new_org.value = new_org.epa
@@ -513,9 +528,6 @@ class Pool(object):
         for organism in organisms_list:
             pdentries[organism.id] = PDEntry(organism.composition,
                                              organism.total_energy)
-            #print('compute pd values organism info:',[organism.id,organism.composition,organism.total_energy])
-        #print('pdentries keys:',list(pdentries.keys()))
-        #print('organism energy:',organism.total_energy)
         # put the pdentries in a list
         pdentries_list = []
         for organism_id in pdentries:
@@ -526,7 +538,6 @@ class Pool(object):
 
         compound_pd = CompoundPhaseDiagram(pdentries_list,
                                            composition_space.endpoints)
-        #print('population.py composition_space',composition_space.endpoints)
         # transform the pdentries and put them in a dictionary, with the
         # organism id's as the keys
         transformed_pdentries = {}
@@ -550,6 +561,7 @@ class Pool(object):
 
         self.compound_pd = compound_pd
         return compound_pd
+
     def compute_fitnesses(self):
         """
         Calculates and assigns fitnesses to all organisms in the pool. If
@@ -584,6 +596,8 @@ class Pool(object):
         for organism in self.to_list():
             if organism not in best_organisms:
                 organism.fitness = 0.0
+        
+        self.queue = deque(sorted(self.queue, key=lambda x: x.value)) 
 
     def compute_relative_fitnesses(self, ref_organism, composition_space):
         """
@@ -858,9 +872,11 @@ class Pool(object):
         if len(composition_space.endpoints) == 2:
             return convex_hull.area
         else:
+            average_value = np.mean([o.value for o in self.queue])
+            num_comps = len(list(set([o.cell.composition for o in self.queue])))
             with open(os.getcwd() + '/convex_hull_data','a') as f:
-                data = {'convex hull volume': convex_hull.volume, 'composition':str(self.promotion_set[-1].cell.composition)}
-                f.write(json.dumps(data) + '\n')
+                line = f"{'convex hull volume:':<25}{convex_hull.volume:<20} composition: {str(self.promotion_set[-1].cell.composition)} average value: {str(average_value)} rate unique comps: {str(num_comps/len(self.queue))}\n" 
+                f.write(line)
             return convex_hull.volume
 
     def to_list(self):
