@@ -1,3 +1,7 @@
+# coding: utf-8
+# Copyright(c) Henniggroup.
+# Distributed under the terms of the MIT License.
+
 from __future__ import division, unicode_literals, print_function
 
 """
@@ -40,7 +44,6 @@ from pymatgen.transformations.standard_transformations import \
 import numpy as np
 from collections import defaultdict
 import random
-
 class IDGenerator(object):
     """
     Generates successive integer ID numbers, starting from 1.
@@ -60,6 +63,7 @@ class IDGenerator(object):
 
         self.id += 1
         return self.id
+
 
 class Organism(object):
     """
@@ -124,8 +128,6 @@ class Organism(object):
     # This keeps the id (sort of) immutable by causing an exception to be
     # raised if the id is attempted to be set with org.id = some_id.
     @property
-    def id(self):
-        return self._id
     def id(self):
         return self._id
 
@@ -458,6 +460,7 @@ class Cell(Structure):
         m = cell.lattice.matrix
         return np.linalg.norm(np.cross(m[0], m[1]))
 
+
 class OffspringGenerator:
     """
     This class handles generating offspring organisms from the pool and the
@@ -518,16 +521,27 @@ class OffspringGenerator:
         tried_variations = []
         # the maximum number of times to try making a valid offspring with a
         # given variation before giving up and trying a different variation
-        max_num_tries = 1000
+        max_num_tries = 10000
 
         while True:
             #print('general.py line 522')
             variation = self.select_variation(random, tried_variations,
                                               variations)
-            print(f'Performing {variation.name}...')
+           
+
             num_tries = 0
             candidates = []
-            n = 2
+            if variation.name == 'permutation':
+                n = 2
+            if variation.name == 'mating':
+                n = 2
+            if variation.name == 'structure mutation':
+                n = 2
+            if variation.name == 'number of atoms mutation':
+                n = 2
+            print('-----------------------------------------------------------------------------------------')
+            print(f'Performing {variation.name} pool size of N = {n}...')
+            print('-----------------------------------------------------------------------------------------')
             while num_tries < max_num_tries and len(candidates) < n:
                 #candidates = variation.looped(
                    # pool, random, geometry, constraints, id_generator,
@@ -537,17 +551,17 @@ class OffspringGenerator:
                     composition_space)
                 #epas,compositions = variation.predict_batches(candidates)
                 #offspring,score = variation.calculate_scores(candidates, compositions, epas, self.pd, self.composition_space)
-
+                
                 if developer.develop(
                         offspring, composition_space, constraints, geometry,
                         pool) and (redundancy_guard.check_redundancy(
                             offspring, whole_pop, geometry) is None):
-
+                                    
                     candidates.append(offspring)
                     #print('candidate sizes:',len(o.cell)
                 else:
                     num_tries = num_tries + 1
-            print('candidate sizes:',[len(o.cell) for o in candidates])
+            #print('candidate sizes:',[len(o.cell) for o in candidates])
             candidate_groups = defaultdict(list)
             for group in candidates:
                 candidate_groups[len(group.cell)].append(group)
@@ -558,13 +572,20 @@ class OffspringGenerator:
                 energies,compositions = variation.predict_batches(candidates)
                 offspring,score = variation.calculate_scores(candidates, compositions, energies, self.pd, self.composition_space)
                 candidate_pool.append([offspring,score])
-
-
+            
+            
             candidate_pool = [org for org in candidate_pool if org[0] != None]
+            if len(candidate_pool) == 0:
+                return [None]
             offspring = random.sample(candidate_pool, k = 1)
+            selected_offsprings = [offspring[0]]
+            for candidate in candidate_pool:
+                if candidate[1] <= 0.1:
+                    selected_offsprings.append(candidate)
             tried_variations.append(variation)
-            print(f'------------------------------ candidate with comp {offspring[0][0].cell.composition} and score {offspring[0][1]} ------------------------------')
-            return offspring[0][0]
+            #print(selected_offsprings)
+            print(f'        ---> selecting candidates with comps {[i[0].cell.composition for i in selected_offsprings]} and scores {[i[1] for i in selected_offsprings]}')
+            return [offspring_organism[0] for offspring_organism in selected_offsprings] #offspring[0][0]
             # if we've tried all the variations without success, then cycle
             # through them again
             if len(tried_variations) == len(variations):
@@ -594,6 +615,7 @@ class OffspringGenerator:
                     return variations[i]
                 else:
                     lower_bound = lower_bound + variations[i].fraction
+
 
 class SelectionProbDist(object):
     """
@@ -643,6 +665,8 @@ class SelectionProbDist(object):
                 self.power = self.default_power
             else:
                 self.power = selection_params['power']
+
+
 class CompositionSpace(object):
     """
     Represents the composition space to be searched by the algorithm.
@@ -794,6 +818,8 @@ class CompositionSpace(object):
             if diff <= 1.1:
                 allowed_pairs.append(pair)
         return allowed_pairs
+
+
 class CompositionFitnessWeight(object):
     """
     Defines how the weight given to the composition fitness of organisms in
@@ -834,6 +860,8 @@ class CompositionFitnessWeight(object):
                 self.power = self.default_power
             else:
                 self.power = comp_fitness_params['power']
+
+
 class StoppingCriteria(object):
     """
     Defines when the search should be stopped.
@@ -961,6 +989,7 @@ class StoppingCriteria(object):
                     redundancy_guard.structure_matcher.fit(organism.cell,
                                                            self.found_cell)
 
+
 class DataWriter(object):
     """
     For writing useful data to a file in the course of a search.
@@ -1068,3 +1097,4 @@ class DataWriter(object):
         with open(self.genes_file, 'a') as genes:
             genes.write('{0}\t {1}\t {2}\n'.format(
                             organism.id, organism.parents, organism.made_by))
+
