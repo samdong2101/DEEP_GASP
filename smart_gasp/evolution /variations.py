@@ -1,3 +1,29 @@
+# coding: utf-8
+# Copyright (c) Henniggroup.
+# Distributed under the terms of the MIT License.
+
+from __future__ import division, unicode_literals, print_function
+
+
+"""
+Variations module:
+
+This module contains the classes used to create offspring organisms from parent
+organisms. All variation classes must implement a do_variation() method.
+
+1. Mating: creates an offspring organism by combining two parent organisms
+
+2. StructureMut: creates an offspring organism by mutating the structure of a
+        parent organism
+
+3. NumAtomsMut: creates an offspring organism by adding or removing atoms
+        from a parent organism
+
+4. Permutation: creates an offspring organism by swapping atoms in a parent
+        organism
+
+"""
+
 from smart_gasp.general import Organism, Cell
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.lattice import Lattice
@@ -14,7 +40,6 @@ from mattersim.forcefield.potential import MatterSimCalculator
 from mattersim.forcefield.potential import Potential
 from mattersim.datasets.utils.build import build_dataloader
 from mattersim.applications.relax import Relaxer
-
 class Mating:
     """
     An operator that creates an offspring organism by combining the structures
@@ -34,7 +59,8 @@ class Mating:
             optional, and it is assumed that mating_params contains this
             parameter.
         """
-
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
         self.name = 'mating'
         self.fraction = mating_params['fraction']  # not optional
 
@@ -61,6 +87,7 @@ class Mating:
         # the cutoff distance (as fraction of atomic radius) below which to
         # merge sites with the same element in the offspring structure
         self.default_merge_cutoff = 1.0
+
         # the mean of the cut location
         if 'mu_cut_loc' not in mating_params:
             self.mu_cut_loc = self.default_mu_cut_loc
@@ -123,11 +150,10 @@ class Mating:
             self.halve_offspring_prob = mating_params['halve_offspring_prob']
         else:
             self.halve_offspring_prob = 0.25 # default
-
+        
         self.compositions = None
         self.predictions = None
         self.candidates = None
-
     def do_variation(self, pool, random, geometry, constraints, id_generator,
                      composition_space):
         """
@@ -197,6 +223,7 @@ class Mating:
                     are closer than self.merge_sites times the atomic radius of
                     the element.
         """
+
         # select two parent organisms from the pool and get their cells
         parent1 = pool.select_organism(random, composition_space)
         parent2 = pool.select_organism(random, composition_space,
@@ -241,6 +268,7 @@ class Mating:
               #'with the mating variation '.format(offspring.id, parent1.id,
                                                   #parent2.id))
         return offspring
+
     def double_parent(self, cell, geometry):
         """
         Modifies a cell by taking a supercell. For bulk geometries, the
@@ -284,6 +312,7 @@ class Mating:
         """
         m = cell.lattice.matrix
         return np.linalg.norm(np.cross(m[0], m[1]))
+
     def grow_parent_cell(self, parent_cell_1, parent_cell_2, geometry, random):
         """
         Modifies the smaller parent cell by taking supercells until it is the
@@ -351,6 +380,7 @@ class Mating:
             return 6
         else:
             return 7
+
     def make_offspring_cell(self, parent_cell_1, parent_cell_2, geometry,
                             constraints, random):
         """
@@ -639,6 +669,7 @@ class Mating:
             return self.merge_sites(new_cell, geometry, constraints)
         else:
             return new_cell
+
     def halve_offspring(self, offspring_cell, mated_vector_index):
         """
         Half the cell along the lattice vector direction that is not
@@ -674,31 +705,29 @@ class Mating:
             return offspring_cell
         else:
             return halved_offspring_cell
-
+    
 
     def predict_batches(self,batch):
 
-        ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        potential = Potential.from_checkpoint(device=device)
+        ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch] 
         dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))]
+        predictions = self.potential.predict_properties(dataloader)
+        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
         self.predictions = predictions
         compositions = [org.cell.composition for org in batch]
         self.compositions = compositions
 
         return total_energy, compositions
 
-    def looped(self, pool, random, geometry, constraints, id_generator,
+    def looped(self, pool, random, geometry, constraints, id_generator, 
             composition_space, n):
         candidates = [self.do_variation(pool, random, geometry, constraints, id_generator, composition_space) for i in range(n)]
-        self.candidates = candidates
+        self.candidates = candidates 
         return candidates
 
     def calculate_scores(self, batch, compositions, predictions, pd, composition_space):
         entries = []
-
+       
         for i in range(len(compositions)):
             try:
                 entry = ComputedEntry(compositions[i],predictions[i])
@@ -706,7 +735,7 @@ class Mating:
                 e_above_hull = pd.get_e_above_hull(transformed_entry)
                 entries.append([batch[i],compositions[i],e_above_hull])
             except Exception as e:
-                print('scores_error:',e)
+                
                 pass
         if len(entries) == 0:
             return None,None
@@ -721,8 +750,6 @@ class Mating:
         #print('------------------------------------------------------------------------------------------------')
         print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
         return sorted_entries[0][0],sorted_entries[0][2]
-
-
 class StructureMut(object):
     """
     An operator that creates an offspring organism by mutating the cell of a
@@ -746,6 +773,8 @@ class StructureMut(object):
         self.name = 'structure mutation'
         self.fraction = structure_mut_params['fraction']  # not optional
         self.compositions = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
         # the default values
         #
         # the fraction of atoms to perturb (on average)
@@ -971,22 +1000,21 @@ class StructureMut(object):
     def predict_batches(self,batch):
 
         ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        potential = Potential.from_checkpoint(device=device)
         dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))]
+        predictions = self.potential.predict_properties(dataloader)
+        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
         self.predictions = predictions
         compositions = [org.cell.composition for org in batch]
         self.compositions = compositions
 
         return total_energy, compositions
 
-    def looped(self, pool, random, geometry, constraints, id_generator,
+    def looped(self, pool, random, geometry, constraints, id_generator,       
             composition_space, n):
         candidates = [self.do_variation(pool, random, geometry, constraints, id_generator, composition_space) for i in range(n)]
-        self.candidates = candidates
-        return candidates
+        self.candidates = candidates       
+        return candidates 
+
 
     def calculate_scores(self, batch, compositions, predictions, pd, composition_space):
         entries = []
@@ -997,7 +1025,7 @@ class StructureMut(object):
                 e_above_hull = pd.get_e_above_hull(transformed_entry)
                 entries.append([batch[i],compositions[i],e_above_hull])
             except Exception as e:
-                print(e)
+                
                 pass
         sorted_entries = sorted(entries,key = lambda x: x[2])
         print([sorted_entry[1],sorted_entry[2]] for sorted_entry in sorted_entries)
@@ -1033,7 +1061,8 @@ class NumAtomsMut(object):
 
         self.name = 'number of atoms mutation'
         self.fraction = num_atoms_mut_params['fraction']  # not optional
-
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
         # the default values
         #
         # the average number of stoichimetries to add
@@ -1043,7 +1072,8 @@ class NumAtomsMut(object):
         # whether to scale the volume of the offspring to equal that of the
         # parent (only done when atoms are added to the cell)
         self.default_scale_volume = True
-
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
         # the average number of stoichiometries to add
         if 'mu_num_adds' not in num_atoms_mut_params:
             self.mu_num_adds = self.default_mu_num_adds
@@ -1299,14 +1329,13 @@ class NumAtomsMut(object):
         site_indices_to_remove = random.sample(all_site_indices, num_removes)
         cell.remove_sites(site_indices_to_remove)
 
+
     def predict_batches(self,batch):
 
         ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        potential = Potential.from_checkpoint(device=device)
-        dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))]
+        dataloader = build_dataloader(ase_batch, only_inference = True) 
+        predictions = self.potential.predict_properties(dataloader)
+        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
         self.predictions = predictions
         compositions = [org.cell.composition for org in batch]
         self.compositions = compositions
@@ -1328,7 +1357,7 @@ class NumAtomsMut(object):
                 e_above_hull = pd.get_e_above_hull(transformed_entry)
                 entries.append([batch[i],compositions[i],e_above_hull])
             except Exception as e:
-                print(e)
+                
                 pass
         sorted_entries = sorted(entries,key = lambda x: x[2])
         print([sorted_entry[1],sorted_entry[2]] for sorted_entry in sorted_entries)
@@ -1341,7 +1370,6 @@ class NumAtomsMut(object):
         #print('------------------------------------------------------------------------------------------------')
         print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
         return sorted_entries[0][0],sorted_entries[0][2]
-
 
 class Permutation(object):
     """
@@ -1367,7 +1395,8 @@ class Permutation(object):
 
         self.name = 'permutation'
         self.fraction = permutation_params['fraction']  # not optional
-
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
         # The max number of times to try getting a parent organism from the
         # pool that can undergo at least one swap. This is needed in case,
         # e.g., the composition space is a single pure element but the
@@ -1407,7 +1436,6 @@ class Permutation(object):
             self.pairs_to_swap = self.default_pairs_to_swap
         else:
             self.pairs_to_swap = permutation_params['pairs_to_swap']
-
 
     def do_variation(self, pool, random, geometry, constraints, id_generator,
                      composition_space):
@@ -1514,7 +1542,6 @@ class Permutation(object):
         else:
             return None
 
-
     def get_possible_swaps(self, cell):
         """
         Returns a list of swaps that are possible to do, based on what atoms
@@ -1607,21 +1634,19 @@ class Permutation(object):
     def predict_batches(self,batch):
 
         ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        potential = Potential.from_checkpoint(device=device)
         dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))]
+        predictions = self.potential.predict_properties(dataloader)
+        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
         self.predictions = predictions
         compositions = [org.cell.composition for org in batch]
         self.compositions = compositions
 
         return total_energy, compositions
 
-    def looped(self, pool, random, geometry, constraints, id_generator,
+    def looped(self, pool, random, geometry, constraints, id_generator,       
             composition_space, n):
         candidates = [self.do_variation(pool, random, geometry, constraints, id_generator, composition_space) for i in range(n)]
-        self.candidates = candidates
+        self.candidates = candidates       
         return candidates
 
     def calculate_scores(self, batch, compositions, predictions, pd, composition_space):
@@ -1633,9 +1658,9 @@ class Permutation(object):
                 e_above_hull = pd.get_e_above_hull(transformed_entry)
                 entries.append([batch[i],compositions[i],e_above_hull])
             except Exception as e:
-                print(e)
+                
                 pass
-
+        
         if len(entries) == 0:
             return None,None
         sorted_entries = sorted(entries,key = lambda x: x[2])
@@ -1648,4 +1673,5 @@ class Permutation(object):
         #print('------------------------------------------------------------------------------------------------')
         print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
         return sorted_entries[0][0],sorted_entries[0][2]
+
                                                                                                                                                        
