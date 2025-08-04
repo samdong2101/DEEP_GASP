@@ -1,0 +1,14 @@
+{"structures_path":"/blue/hennig/sam.dong/mp_list_07_21_2025.pkl",
+"elem_list": ["Ca","K","Fe","As"],
+"max_atoms":20,
+"min_atoms":1,
+  "g_lr": 0.0002,
+  "c_lr": 0.000077,
+  "epochs_inner": 10000,
+  "epochs_outer":1,
+  "batch_size": 64,
+  "generator_weights_path":"/blue/hennig/sam.dong/test_github/test3/WGANsg/weights/",
+  "pretrained_path": "/blue/hennig/sam.dong/test_github/test3/WGANsg/weights/CaKFeAs_1-20_atoms_10000.h5",
+  "num_images": 1000,
+  "poscar_path":"/blue/hennig/sam.dong/SMART_gasp/GASP-python/gasp/WGANsg/init_population/"
+  }
