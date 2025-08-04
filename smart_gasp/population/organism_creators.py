@@ -1,3 +1,4 @@
+rom __future__ import division, unicode_literals, print_function
 from smart_gasp.general import Organism, Cell
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.composition import Composition
@@ -17,6 +18,22 @@ from smart_gasp.WGANsg.post_process import img2struct
 import json
 import pickle
 from smart_gasp.WGANsg.WGAN_sg import WGAN_sg_model
+import shutil
+#from __future__ import division, unicode_literals, print_function
+print('organism creator inputs done')
+
+"""
+Organism Creators module:
+
+This module contains the classes used to create organisms for the initial
+population.
+
+1. RandomOrganismCreator: creates random organisms
+
+2. FileOrganismCreator: creates organisms by reading their structures from
+        files
+
+"""
 
 
 class RandomOrganismCreator:
@@ -67,7 +84,6 @@ class RandomOrganismCreator:
         # volume scaling behavior
         # default volumes per atom of elemental ground state structures
         # computed from structures on materials project (materialsproject.org)
-
         self.all_default_vpas = {'H': 13.89, 'He': 15.79, 'Li': 20.12,
                                  'Be': 7.94, 'B': 7.25, 'C': 10.58,
                                  'N': 42.73, 'O': 13.46, 'F': 16.00,
@@ -109,7 +125,7 @@ class RandomOrganismCreator:
             self.allow_endpoints = self.default_allow_endpoints
             self.allow_binary = self.default_allow_binary
             self.vpas = self.default_vpas
-       # parse the parameters and set to defaults if necessary
+        # parse the parameters and set to defaults if necessary
         else:
             # the number to make
             if 'number' not in random_org_parameters:
@@ -151,6 +167,10 @@ class RandomOrganismCreator:
             else:
                 self.allow_endpoints = random_org_parameters['allow_endpoints']
 
+            #ACH allowing binary composition (only used for pd searches)
+            #TODO: Currently allow_binary check is performed even if the 
+            #      material system for pd search is binary. Better implementation
+            #      so that allow_binary check only for ternary (and above) pd search
             if 'allow_binary' not in random_org_parameters:
                 self.allow_binary = self.default_allow_binary
             elif random_org_parameters['allow_binary'] in (None, 'default'):
@@ -174,6 +194,7 @@ class RandomOrganismCreator:
         self.num_made = 0  # number added to initial population
         self.is_successes_based = True  # it's based on number added
         self.is_finished = False
+
     def get_default_vpas(self, composition_space):
         """
         Returns a dictionary containing the default volumes per atom for all
@@ -188,6 +209,7 @@ class RandomOrganismCreator:
             default_vpas[element.symbol] = self.all_default_vpas[
                 element.symbol]
         return default_vpas
+
     def create_organism(self, id_generator, composition_space, constraints,
                         random):
         """
@@ -238,6 +260,7 @@ class RandomOrganismCreator:
                               composition_space)
         print('Random organism creator making organism {} '.format(
             random_org.id))
+        #self.update_status()
         return random_org
 
     def make_random_lattice(self, constraints, random):
@@ -338,7 +361,7 @@ class RandomOrganismCreator:
             for _ in range(random_num_formulas*int(reduced_formula[specie])):
                 species.append(specie)
         return species
-
+        
     def get_pd_species_list(self, composition_space, constraints, random):
         """
         Returns a list containing the species in the random organism.
@@ -483,6 +506,7 @@ class RandomOrganismCreator:
             for _ in range(int(random_composition[specie])):
                 species.append(specie)
         return species
+
     def get_random_endpoint_fractions(self, composition_space, random):
         """
         Uniformly samples the composition space. Returns a list containing the
@@ -586,6 +610,7 @@ class RandomOrganismCreator:
         if self.num_made == self.number:
             self.is_finished = True
 
+
 class FileOrganismCreator:
     """
     Creates organisms from files (poscar or cif) for the initial population.
@@ -614,6 +639,7 @@ class FileOrganismCreator:
         self.is_successes_based = False  # it's based on number attempted
         self.is_finished = False
         self.path = None
+
     def create_organism(self, id_generator, composition_space, constraints,
                         random):
         """
@@ -670,6 +696,7 @@ class FileOrganismCreator:
             # added # 06/24/2024
             self.update_status()
             return None
+
     def get_cells(self):
         """
         Creates cells from the files and puts them in a list.
@@ -770,7 +797,6 @@ class WGANsg:
                 pass
             count = count + 1
         return np.array(coords)
-
     def generate(self, input_file):
         with open(input_file) as f:
             config = json.load(f)
@@ -791,7 +817,8 @@ class WGANsg:
         try:
             os.mkdir(poscar_path)
         except:
-            pass
+            shutil.rmtree(poscar_path)
+            os.mkdir(poscar_path)
         generator = WGAN_sg_model.build_generator(png_dim1,png_dim2,64)
         generator.load_weights(pretrained_path)
         then = time.time()
@@ -806,8 +833,6 @@ class WGANsg:
         self.path_to_folder = poscar_path
         self.files = [f for f in os.listdir(self.path_to_folder) if
                       os.path.isfile(os.path.join(self.path_to_folder, f))]
-
-
     def train(self, input_file):
         with open(args.config) as f:
             config = json.load(f)
@@ -890,7 +915,6 @@ class WGANsg:
         generator.save_weights(f'{generator_weight_path}/{"".join(elem_list)}_{min_atoms}-{max_atoms}_atoms_final_{now}.h5')
         print('-- training complete!!!')
 
-
     def create_organism(self, id_generator, composition_space, constraints,
                         random):
         """
@@ -948,7 +972,6 @@ class WGANsg:
             self.update_status()
             return None
 
-
     def get_cells(self):
         """
         Creates cells from the files and puts them in a list.
@@ -988,4 +1011,3 @@ class WGANsg:
             self.is_finished = True
     def organism_creator(self):
         self.generate(self.input_file)
-
