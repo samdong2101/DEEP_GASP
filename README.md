@@ -10,15 +10,14 @@ for population initialization and tournament based scoring/selection (TBS) of ca
 ## 1. Create Conda Environment
 - While not mandatory, we recommend creating a clean conda environment before installing SMART-GASP to avoid potential package conflicts. You can create and activate a conda environment with the following commands:
 - ```bash conda create -n smart_gasp python=3.10 -y```
-
+- 
 ### Activate the environment
 - ```conda activate smart_gasp```
+
+### To install from source
+- ```git clone git@github.com:samdong2101/SMART_GASP`
 
 ## 2. Install required packages
 - ```pip install -r requirements.txt```
 
-
-## 3. STEP 3
-
-## 4. STEP 4
 
