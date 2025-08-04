@@ -15,7 +15,7 @@ for population initialization and tournament based scoring/selection (TBS) of ca
 - ```conda activate smart_gasp```
 
 ### To install from source
-- ```git clone git@github.com:samdong2101/SMART_GASP`
+- ```git clone git@github.com:samdong2101/SMART_GASP](https://github.com/samdong2101/SMART_GASP.git```
 
 ## 2. Install required packages
 - ```pip install -r requirements.txt```
