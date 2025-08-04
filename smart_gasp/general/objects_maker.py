@@ -1,3 +1,17 @@
+# coding: utf-8
+# Copyright (c) Henniggroup.
+# Distributed under the terms of the MIT License.
+
+from __future__ import division, unicode_literals, print_function
+
+"""
+Objects Maker module:
+
+This module contains functions for creating the (singleton) objects
+used by the genetic algorithm during the search.
+
+"""
+
 from smart_gasp.general import general
 from smart_gasp.population import population
 from smart_gasp.general import geometry as geo
@@ -295,6 +309,7 @@ def make_objects(parameters):
     objects_dict['job_specs'] = job_specs
 
     return objects_dict
+
 def get_lat_match_params(parameters):
     """
     Returns the lattice matching constraints from input yaml files as a
@@ -383,13 +398,13 @@ def make_organism_creators(parameters, composition_space, constraints):
                 parameters['InitialPopulation']['random'], composition_space,
                 constraints)
             initial_organism_creators.append(random_organism_creator)
-
+        
 
         if 'generative' in parameters['InitialPopulation']:
             wgans_organism_creator = organism_creators.WGANsg(
                     parameters['InitialPopulation']['generative']['input_script'])
             initial_organism_creators.append(wgans_organism_creator)
-
+        
             if 'input_script' not in parameters['InitialPopulation'][
                     'generative']:
                 print('need to either provide an input script for generative initialization or have the keyword "input_script" in the gasp input file...')
@@ -461,6 +476,8 @@ def make_energy_calculator(parameters, geometry, composition_space):
               'keyword.')
         print('Quitting...')
         quit()
+    elif 'mattersim' in parameters['EnergyCode']:
+        return make_mattersim_energy_calculator(parameters,geometry)
     # for GULP
     elif 'gulp' in parameters['EnergyCode']:
         return make_gulp_energy_calculator(parameters, geometry)
@@ -579,6 +596,21 @@ def make_lammps_energy_calculator(parameters, geometry):
 
         return energy_calculators.LammpsEnergyCalculator(
                 input_script_path, geometry)
+
+
+def make_mattersim_energy_calculator(parameters,geometry):
+    """
+    Returns a mattersim object, or quits if one cannot be made.
+
+    Args:
+        parameters: the dictionary produced by calling yaml.load() on the input
+            file
+
+        geometry: the Geometry for the search
+    """
+
+    return energy_calculators.MatterSimEnergyCalculator(geometry)
+
 
 def make_vasp_energy_calculator(parameters, composition_space, geometry):
     """
