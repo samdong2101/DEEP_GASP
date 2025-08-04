@@ -14,9 +14,9 @@ for population initialization and tournament based scoring/selection (TBS) of ca
 ### Activate the environment
 - ```conda activate smart_gasp```
 
-# Install required packages
-pip install -r requirements.txt
-## 2. STEP 2
+## 2. Install required packages
+- pip install -r requirements.txt
+
 
 ## 3. STEP 3
 
