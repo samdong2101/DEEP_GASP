@@ -1670,8 +1670,5 @@ class Permutation(object):
         except:
             random_ind = np.random.randint(len(sorted_entries)+1//2)
 
-        #print('------------------------------------------------------------------------------------------------')
         print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
         return sorted_entries[0][0],sorted_entries[0][2]
-
-                                                                                                                                                       
