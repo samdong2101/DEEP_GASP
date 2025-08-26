@@ -10,8 +10,7 @@ for population initialization and tournament based scoring/selection (TBS) of ca
 
 ## 1. Create Conda Environment
 - While not mandatory, we recommend creating a clean conda environment before installing DEEP-GASP to avoid potential package conflicts. You can create and activate a conda environment with the following commands:
-- ```bash conda create -n deep_gasp python=3.10 -y```
-- 
+- ```conda create -n deep_gasp python=3.10```
 ### Activate the environment
 - ```conda activate deep_gasp```
 
