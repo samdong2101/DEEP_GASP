@@ -1,4 +1,5 @@
 
+
 # coding: utf-8
 # Copyright(c) Henniggroup.
 # Distributed under the terms of the MIT License.
@@ -474,7 +475,7 @@ class OffspringGenerator:
     def make_offspring_organism(self, random, pool, variations, geometry,
                                 id_generator, whole_pop, developer,
                                 redundancy_guard, composition_space,
-                                constraints):
+                                constraints, num_mating, num_mutation):
         """
         Returns a developed, non-redundant, unrelaxed offspring organism
         generated with one of the variations.
@@ -533,13 +534,13 @@ class OffspringGenerator:
             num_tries = 0
             candidates = []
             if variation.name == 'permutation':
-                n = 100
+                n = num_mutation
             if variation.name == 'mating':
-                n = 2
+                n = num_mating
             if variation.name == 'structure mutation':
-                n = 100
+                n = num_mutation
             if variation.name == 'number of atoms mutation':
-                n = 100
+                n = num_mutation
             print('-----------------------------------------------------------------------------------------')
             print(f'Performing {variation.name} pool size of N = {n}...')
             print('-----------------------------------------------------------------------------------------')
