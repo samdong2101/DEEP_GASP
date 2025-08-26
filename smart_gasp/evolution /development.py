@@ -1,3 +1,7 @@
+# coding: utf-8
+# Copyright (c) Henniggroup.
+# Distributed under the terms of the MIT License.
+
 from __future__ import division, unicode_literals, print_function
 
 
@@ -32,6 +36,7 @@ except ImportError:
 
 import warnings
 import math
+
 
 class Constraints(object):
     '''
@@ -70,8 +75,6 @@ class Constraints(object):
         self.default_magmom = None
         self.default_mid_factor = 0.6
         self.default_max_interface_atoms = 50
-
-
 
         # set to defaults
         if constraints_parameters in (None, 'default'):
@@ -217,7 +220,7 @@ class Constraints(object):
         # check that min and max numbers of atoms makes sense
         self.check_num_atoms_range(composition_space)
 
-      def set_all_to_defaults(self, composition_space):
+    def set_all_to_defaults(self, composition_space):
         '''
         Sets all general constraints (those in Constraints block of input file)
         to default values.
@@ -321,6 +324,8 @@ class Constraints(object):
                       'for the allowed number of atoms.')
                 print('Quitting...')
                 quit()
+
+
 class Developer(object):
     '''
     A Developer object is used to develop an organism before evaluating its
@@ -403,7 +408,7 @@ class Developer(object):
                                             composition_space,
                                             constraints, pool):
             return False
-
+        
         #ACH check if the organism is binary and if binary, whether
         #ACH allowed by constraints:
         if not self.is_binary_and_allowed(organism, constraints):
@@ -465,6 +470,7 @@ class Developer(object):
             #    organism.id))
             return False
         return True
+
     def is_in_composition_space(self, organism, geometry, composition_space,
                                 constraints, pool):
         """
@@ -604,6 +610,7 @@ class Developer(object):
             # TODO: call special cell reduction for other geometries here if
             # needed (doesn't makes sense for wires or clusters)
         return True
+
     def scale_volume(self, organism, composition_space, pool):
         """
         Returns a boolean indicating whether volume scaling did not fail.
@@ -653,6 +660,7 @@ class Developer(object):
                       'development '.format(organism.id))
                 return False
         return True
+
     def scale_volume_pd(self, organism, composition_space, pool):
         """
         Returns a boolean indicating whether volume scaling did not fail.
@@ -752,6 +760,7 @@ class Developer(object):
                       'development '.format(organism.id))
                 return False
         return True
+
     def satisfies_lattice_constraints(self, organism, geometry, constraints):
         """
         Returns a boolean indicating whether the organism satisfies the
@@ -799,7 +808,7 @@ class Developer(object):
                 return False
         return True
 
-      def satisfies_mids_constraints(self, organism, constraints, pre_dev=True):
+    def satisfies_mids_constraints(self, organism, constraints, pre_dev=True):
         """
         Returns a boolean indicating whether the organism satisfies the
         per-species minimum interatomic distance constraints.
@@ -914,6 +923,7 @@ class Developer(object):
                 return False
 
         return True
+
     def satisfies_post_lma_n_atoms(self, organism, constraints):
         """
         Returns a boolean indicating whether the organism satisfies the
@@ -943,6 +953,8 @@ class Developer(object):
                 organism.id))
             return False
         return True
+
+
 class RedundancyGuard(object):
     '''
     A RedundancyGuard object is used to check if an Organism is redundant with
@@ -1068,6 +1080,7 @@ class RedundancyGuard(object):
             self.molecule_matcher = MoleculeMatcher(self.rmsd_tol,
                                                     iso_mol_atom_mapper)
             ob.obErrorLog.SetOutputLevel(0)  # to suppress openbabel warnings
+
     def set_all_to_defaults(self):
         '''
         Sets all the redundancy parameters to default values.
@@ -1167,4 +1180,3 @@ class RedundancyGuard(object):
         mol1 = Molecule(cell1.species, cell1.cart_coords)
         mol2 = Molecule(cell2.species, cell2.cart_coords)
         return self.molecule_matcher.fit(mol1, mol2)
-                                                                                                                                                                         
