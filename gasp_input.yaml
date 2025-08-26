@@ -3,23 +3,31 @@ CompositionSpace:
     - K
     - Fe
     - As
+
 EnergyCode:
-  mattersim:
+    mattersim:
+
 Geometry:
     shape: bulk
 
 NumCalcsAtOnce: 1
+
 InitialPopulation:
-  generative: 
-    input_script: /blue/hennig/sam.dong/SMART_gasp/GASP-python/smart_gasp/WGANsg/input.json
-  from_files:
-    path_to_folder: /blue/hennig/sam.dong/SMART_gasp/GASP-python/endpoints/Ca_K_Fe_As
+    generative:
+        input_script: /blue/hennig/sam.dong/smart_gasp_test_github/DEEP_GASP/deep_gasp/WGANsg/input.json
+    from_files:
+        path_to_folder: /blue/hennig/sam.dong/SMART_gasp/GASP-python/endpoints/Ca_K_Fe_As
+
 Pool:
     size: 75
+
+TBS:
+    num_mating: 2
+    num_mutation: 2
+
 Selection:
     num_parents: 75
     power: 1
-
 
 Development:
     niggli: False
@@ -32,7 +40,7 @@ Constraints:
     allow_binary: True
 
 StoppingCriteria:
-    num_energy_calcs: 500
+    num_energy_calcs: 3000
 
 
 job_specs:
