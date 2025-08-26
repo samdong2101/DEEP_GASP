@@ -4,12 +4,12 @@ from deep_gasp.general import objects_maker
 from deep_gasp import parameters_printer
 from deep_gasp.evolution import variations
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-from dask_jobqueue import SLURMCluster
-from dask.distributed import Client
+#from dask_jobqueue import SLURMCluster
+#from dask.distributed import Client
 import numpy as np
 from collections import Counter
-import dask
-import dask.distributed
+#import dask
+#import dask.distributed
 import copy
 import threading
 import random
@@ -20,15 +20,15 @@ import os
 import datetime
 from datetime import datetime
 from time import sleep
-from dask.distributed import Client
-import dask
-import dask.distributed
+#from dask.distributed import Client
+#import dask
+#import dask.distributed
 from deep_gasp import general
 import pickle
 from pymatgen.entries.computed_entries import ComputedEntry
 from pymatgen.analysis.phase_diagram import PDEntry
-import psutil 
-import logging 
+import psutil
+import logging
 import signal
 
 class DEEP_GASP():
@@ -40,7 +40,7 @@ class DEEP_GASP():
             quit()
         else:
             input_file = os.path.abspath(sys.argv[1])
-            
+
         try:
             with open(input_file, 'r') as f:
                 self.parameters = yaml.load(f, Loader=yaml.FullLoader)
@@ -69,9 +69,12 @@ class DEEP_GASP():
         self.job_specs = self.objects_dict['job_specs']
         self.bool = True
         self.garun_dir = str(os.getcwd()) + '/' + self.run_dir_name
-        garun_dir = self.garun_dir 
-        
-        elements_str = "_".join(str(el) for comp in self.composition_space.endpoints for el in comp.elements) 
+        self.num_mating = self.parameters['TBS']['num_mating']
+        self.num_mutation = self.parameters['TBS']['num_mutation']
+        self.total_calcs = self.parameters['StoppingCriteria']['num_energy_calcs']
+        garun_dir = self.garun_dir
+
+        elements_str = "_".join(str(el) for comp in self.composition_space.endpoints for el in comp.elements)
         now = str(datetime.now()).replace(' ','_')
         garun_dir += '_' + elements_str + '_' + now
         os.mkdir(garun_dir)
@@ -90,11 +93,11 @@ class DEEP_GASP():
         stdout_path = log_dir / f"job_{job_id}.log"
         stderr_path = log_dir / f"err_{job_id}.log"
         sys.stdout = open(stdout_path, "w")
-        sys.stderr = open(stderr_path, "w") 
+        sys.stderr = open(stderr_path, "w")
 
     def initial_population(self):
-        
-        
+
+
         num_finished_calcs = 0
         self.initial_pop = population.InitialPopulation(self.run_dir_name)
         signal.signal(signal.SIGALRM, self.timeout_handler)
@@ -113,7 +116,7 @@ class DEEP_GASP():
                         while new_organism is None and not creator.is_finished:
                             new_organism = creator.create_organism(
                                 self.id_generator, self.composition_space, self.constraints, random)
-                        if new_organism is not None: 
+                        if new_organism is not None:
                             self.geometry.unpad(new_organism.cell, new_organism.n_sub,
                                                                         self.constraints)
                             #if self.developer.develop(new_organism, self.composition_space,
@@ -156,19 +159,20 @@ class DEEP_GASP():
                 pass
 
         return self.pool
-    
+
 
     def perform_variations(self,pool):
-    
+
         i = 0
         scores = []
         self.num_finished_calcs = 0
         signal.signal(signal.SIGALRM, self.timeout_handler)
-        while self.num_finished_calcs < 3000:
+        while self.num_finished_calcs < self.total_calcs:
             offspring_generator = general.OffspringGenerator(self.pool.compound_pd, self.composition_space)
             unrelaxed_offsprings = offspring_generator.make_offspring_organism(
             random, self.pool, self.variations, self.geometry, self.id_generator, self.whole_pop,
-            self.developer, self.redundancy_guard, self.composition_space, self.constraints)
+            self.developer, self.redundancy_guard, self.composition_space, self.constraints,
+            self.num_mating, self.num_mutation)
             for unrelaxed_offspring in unrelaxed_offsprings:
                 if unrelaxed_offspring is not None:
                     self.whole_pop.append(copy.deepcopy(unrelaxed_offspring))
@@ -193,7 +197,7 @@ class DEEP_GASP():
                                         relaxed_offspring,
                                         self.composition_space)
                                     self.ga_logger(relaxed_offspring,add = True,pop_pool = True)
-                                    self.num_finished_calcs += 1  
+                                    self.num_finished_calcs += 1
                                     self.pool.compute_fitnesses()
                                     self.pool.compute_selection_probs()
                                     progress = self.pool.get_progress(self.composition_space)
@@ -208,7 +212,7 @@ class DEEP_GASP():
                                 self.pool.compute_fitnesses()
                                 self.pool.compute_selection_probs()
                                 progress = self.pool.get_progress(self.composition_space)
-                                remove_bool = np.random.randint(0,2) 
+                                remove_bool = np.random.randint(0,2)
                                 if len(self.pool.queue) > int(self.pool.size):
                                     if remove_bool == 0:
                                         print([f'Organism ({o.id},{o.cell.composition}): {o.value}' for o in self.pool.queue])
@@ -224,7 +228,7 @@ class DEEP_GASP():
                                         self.ga_logger(self.pool.queue[indices],remove = True,pop_pool = True)
                                         del self.pool.queue[indices]
                                         print([f'Organism ({o.id},{o.cell.composition}): {o.value}' for o in self.pool.queue])
-                                                                        
+
                     else:
                         pass
                 else:
@@ -237,7 +241,7 @@ class DEEP_GASP():
 
     def timeout_handler(self, signum, frame):
         raise TimeoutError(f"Convergence failure on organism, calculation took too long")
-    
+
     def ga_logger(self, organism, add = False, remove = False, init_pop = False, pop_pool = False):
         file_exists = os.path.exists(os.path.join(os.getcwd(),'ga_history'))
         queue = [f'Organism (ID:{o.id}, Comp:{o.cell.composition}): {o.value}' for o in self.pool.queue]
@@ -247,7 +251,7 @@ class DEEP_GASP():
                 f.write("=" * 128 + "\n")
                 f.write("----- Search Space -----" +"\n")
                 f.write(f"composition space: {self.composition_space.endpoints}" + "\n")
-                
+
             if add:
                 if init_pop:
                     f.write("-" * 128 + "\n")
@@ -278,5 +282,3 @@ def main():
     print('done!')
 if __name__ == "__main__":
     main()
-
-
