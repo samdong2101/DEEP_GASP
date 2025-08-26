@@ -1,3 +1,4 @@
+# Core Python
 import os
 import io
 import csv
@@ -136,6 +137,7 @@ class PreprocessData:
         else:
             print('-- Done preprocessing! ')
             return filtered_structures
+
 
 class PNGrepresentation:
     def __init__(self,structures_list,bool_frac_coords = True):
