@@ -1,3 +1,4 @@
+
 # coding: utf-8
 # Copyright(c) Henniggroup.
 # Distributed under the terms of the MIT License.
@@ -532,13 +533,13 @@ class OffspringGenerator:
             num_tries = 0
             candidates = []
             if variation.name == 'permutation':
-                n = 2
+                n = 100
             if variation.name == 'mating':
                 n = 2
             if variation.name == 'structure mutation':
-                n = 2
+                n = 100
             if variation.name == 'number of atoms mutation':
-                n = 2
+                n = 100
             print('-----------------------------------------------------------------------------------------')
             print(f'Performing {variation.name} pool size of N = {n}...')
             print('-----------------------------------------------------------------------------------------')
@@ -1097,4 +1098,3 @@ class DataWriter(object):
         with open(self.genes_file, 'a') as genes:
             genes.write('{0}\t {1}\t {2}\n'.format(
                             organism.id, organism.parents, organism.made_by))
-
