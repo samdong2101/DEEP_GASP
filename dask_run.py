@@ -3,13 +3,10 @@ from deep_gasp.population import population
 from deep_gasp.general import objects_maker
 from deep_gasp import parameters_printer
 from deep_gasp.evolution import variations
+from deep_gasp import general
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-#from dask_jobqueue import SLURMCluster
-#from dask.distributed import Client
 import numpy as np
 from collections import Counter
-#import dask
-#import dask.distributed
 import copy
 import threading
 import random
@@ -20,10 +17,6 @@ import os
 import datetime
 from datetime import datetime
 from time import sleep
-#from dask.distributed import Client
-#import dask
-#import dask.distributed
-from deep_gasp import general
 import pickle
 from pymatgen.entries.computed_entries import ComputedEntry
 from pymatgen.analysis.phase_diagram import PDEntry
@@ -33,7 +26,6 @@ import signal
 
 class DEEP_GASP():
     def __init__(self):
-        # get dictionaries from the input file (in yaml format)
         if len(sys.argv) < 2:
             print('No input file given.')
             print('Quitting...')
@@ -48,8 +40,6 @@ class DEEP_GASP():
             print('Error reading input file.')
             print('Quitting...')
             quit()
-
-        # make the objects needed by the algorithm
         self.whole_pop = []
         self.num_finished_calcs = 0
         self.objects_dict = objects_maker.make_objects(self.parameters)
@@ -119,8 +109,6 @@ class DEEP_GASP():
                         if new_organism is not None:
                             self.geometry.unpad(new_organism.cell, new_organism.n_sub,
                                                                         self.constraints)
-                            #if self.developer.develop(new_organism, self.composition_space,
-                                                 #self.constraints, self.geometry, self.pool):
                             redundant_organism = self.redundancy_guard.check_redundancy(
                                 new_organism, self.whole_pop, self.geometry)
                             if redundant_organism is None:  # no redundancy
