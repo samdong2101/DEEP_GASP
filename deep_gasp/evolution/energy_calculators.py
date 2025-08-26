@@ -1285,9 +1285,6 @@ class MatterSimEnergyCalculator:
             print(f"Error running mattersim on organism {organism.id}: {e}")
             return None
 
-        #finally:
-            #print(f'    ---> resetting alarm')
-            #signal.alarm(0)
         
         return organism
 
