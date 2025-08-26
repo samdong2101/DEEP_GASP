@@ -17,10 +17,11 @@ from ase import Atoms
 from ase.io import read, write
 from ase.build import molecule
 
+
 class POSCAR():
     def __init__(self, images, composition, path):
         # Pairwise distance matrices and max dimension
-        self.images = images
+        self.images = images 
         self.elem_list = composition
         self.path = path
 
@@ -95,7 +96,7 @@ class POSCAR():
         species_list = [[round(float(an)) for an in atomic_numbers]
                         for atomic_numbers in extracted_atomic_numbers]
         reference_species = [Element(element).number for element in elem_list]
-
+        
         corrected_species_list = [self.closest_number(reference_species, species)
                                   for species in species_list]
 
@@ -126,7 +127,6 @@ class POSCAR():
             min_val = min(reference, key=lambda x: abs(x - i))
             min_vals.append(min_val)
         return min_vals
-
 
     def get_coordinates(self, images, dims):
         """
@@ -200,7 +200,7 @@ class POSCAR():
                                                       param[3], param[4], param[5])
                               for param in parameters]
         structure_list = []
-        count = 0
+        count = 0 
         for i in range(len(coords)):
             try:
                 structure = Structure(lattice_parameters[i], species[i], coords[i])
@@ -215,7 +215,7 @@ class POSCAR():
                           for i in range(len(coords))]
 
         return structure_list
-
+    
     def convert_to_poscars(self):
         try:
             os.mkdir(self.path)
@@ -229,4 +229,3 @@ class POSCAR():
         structures = self.create_poscar(coords,species,lattice_parameters,self.path)
         print(f'-- sucessfully converted {len(self.images)} images into structures within {self.elem_list} composition in {self.path}!')
         return structures
-                                                                                                                                                                                                          
