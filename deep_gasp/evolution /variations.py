@@ -24,7 +24,7 @@ organisms. All variation classes must implement a do_variation() method.
 
 """
 
-from smart_gasp.general import Organism, Cell
+from deep_gasp.general import Organism, Cell
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import Element, Specie

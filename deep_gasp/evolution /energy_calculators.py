@@ -21,7 +21,7 @@ do_energy_calculation() method.
 """
 import sys
 
-from smart_gasp.general import Cell
+from deep_gasp.general import Cell
 
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure

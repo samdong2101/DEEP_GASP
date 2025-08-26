@@ -1,5 +1,5 @@
 from __future__ import division, unicode_literals, print_function
-from smart_gasp.general import Organism, Cell
+from deep_gasp.general import Organism, Cell
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.composition import Composition
 from fractions import Fraction
@@ -13,11 +13,11 @@ import os
 import numpy as np
 import time
 import tensorflow as tf
-from smart_gasp.WGANsg.featurize import struct2img
-from smart_gasp.WGANsg.post_process import img2struct
+from deep_gasp.WGANsg.featurize import struct2img
+from deep_gasp.WGANsg.post_process import img2struct
 import json
 import pickle
-from smart_gasp.WGANsg.WGAN_sg import WGAN_sg_model
+from deep_gasp.WGANsg.WGAN_sg import WGAN_sg_model
 import shutil
 #from __future__ import division, unicode_literals, print_function
 print('organism creator inputs done')

@@ -12,13 +12,13 @@ used by the genetic algorithm during the search.
 
 """
 
-from smart_gasp.general import general
-from smart_gasp.population import population
-from smart_gasp.general import geometry as geo
-from smart_gasp.evolution import variations
-from smart_gasp.evolution import energy_calculators
-from smart_gasp.population import organism_creators
-from smart_gasp.evolution import development
+from deep_gasp.general import general
+from deep_gasp.population import population
+from deep_gasp.general import geometry as geo
+from deep_gasp.evolution import variations
+from deep_gasp.evolution import energy_calculators
+from deep_gasp.population import organism_creators
+from deep_gasp.evolution import development
 
 from pymatgen.core.structure import Structure
 

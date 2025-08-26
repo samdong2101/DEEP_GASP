@@ -1,8 +1,8 @@
-from smart_gasp.population import organism_creators
-from smart_gasp.population import population
-from smart_gasp.general import objects_maker
-from smart_gasp import parameters_printer
-from smart_gasp.evolution import variations
+from deep_gasp.population import organism_creators
+from deep_gasp.population import population
+from deep_gasp.general import objects_maker
+from deep_gasp import parameters_printer
+from deep_gasp.evolution import variations
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from dask_jobqueue import SLURMCluster
 from dask.distributed import Client
@@ -23,7 +23,7 @@ from time import sleep
 from dask.distributed import Client
 import dask
 import dask.distributed
-from smart_gasp import general
+from deep_gasp import general
 import pickle
 from pymatgen.entries.computed_entries import ComputedEntry
 from pymatgen.analysis.phase_diagram import PDEntry
@@ -31,7 +31,7 @@ import psutil
 import logging 
 import signal
 
-class SMART_GASP():
+class DEEP_GASP():
     def __init__(self):
         # get dictionaries from the input file (in yaml format)
         if len(sys.argv) < 2:
@@ -272,7 +272,7 @@ class SMART_GASP():
                     f.write("\n".join(queue) + "\n")
 
 def main():
-    smart_ga = SMART_GASP()
+    smart_ga = DEEP_GASP()
     pool = smart_ga.initial_population()
     smart_ga.perform_variations(pool)
     print('done!')
