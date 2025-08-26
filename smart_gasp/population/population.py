@@ -151,6 +151,7 @@ class InitialPopulation():
                 qhull_data = compound_pd.qhull_data
             # for some reason, the last point is positive, so remove it
                 hull_data = np.delete(qhull_data, -1, 0)
+                print([hull for hull in qhull_data])
             except:
                 print('population.py line 157: all endpoints probably arent available for PD construction')
             # make a ConvexHull object from the hull data
@@ -479,7 +480,7 @@ class Pool(object):
         print('     ---> Replacing organism {} with organism {} in the pool '.format(
             old_org.id, new_org.id))
         try:
-            os.mkdir(os.getcwd() + '/initial_population')
+            os.mkdir(os.getcwd() + '/offspring')
         except:
             pass
         new_org.cell.sort()
@@ -858,24 +859,61 @@ class Pool(object):
                                      organism.total_energy))
         compound_pd = CompoundPhaseDiagram(pdentries,
                                            composition_space.endpoints)
-
+    
         # get the data for the convex hull
         qhull_data = compound_pd.qhull_data
+        print([hull for hull in qhull_data])
         # for some reason, the last point is positive, so remove it
         hull_data = np.delete(qhull_data, -1, 0)
 
         # make a ConvexHull object from the hull data
         try:
             convex_hull = ConvexHull(hull_data)
-        except:
+        except Exception as e:
+            print('convex hull errored, still writing file')
+            average_value = np.mean([o.value for o in self.queue])
+            num_comps = len(list(set([o.cell.composition for o in self.queue])))
+            with open(os.getcwd() + '/convex_hull_data','a') as f:
+                line = (
+                f"{'convex hull area  --':<21}{0.000000:<22.6f}"
+                f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
+                f"{'average value  --':<18}{average_value:<22.6f}"
+                f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
+                )
+                f.write(line) 
             return None
         if len(composition_space.endpoints) == 2:
+            average_value = np.mean([o.value for o in self.queue])
+            num_comps = len(list(set([o.cell.composition for o in self.queue])))
+            with open(os.getcwd() + '/convex_hull_data','a') as f:
+
+
+                line = (
+    f"{'convex hull area  --':<21}{convex_hull.area:<22.6f}"
+    f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
+    f"{'average value  --':<18}{average_value:<22.6f}"
+    f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
+)
+
+
+
+                f.write(line)
             return convex_hull.area
+
         else:
             average_value = np.mean([o.value for o in self.queue])
             num_comps = len(list(set([o.cell.composition for o in self.queue])))
             with open(os.getcwd() + '/convex_hull_data','a') as f:
-                line = f"{'convex hull volume:':<25}{convex_hull.volume:<20} composition: {str(self.promotion_set[-1].cell.composition)} average value: {str(average_value)} rate unique comps: {str(num_comps/len(self.queue))}\n" 
+
+                line = (
+    f"{'convex hull volume  --':<21}{convex_hull.volume:<22.6f}"
+    f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
+    f"{'average value  --':<18}{average_value:<22.6f}"
+    f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
+)
+
+
+
                 f.write(line)
             return convex_hull.volume
 
