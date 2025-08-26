@@ -1,4 +1,4 @@
-rom __future__ import division, unicode_literals, print_function
+from __future__ import division, unicode_literals, print_function
 from smart_gasp.general import Organism, Cell
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.composition import Composition
@@ -833,6 +833,7 @@ class WGANsg:
         self.path_to_folder = poscar_path
         self.files = [f for f in os.listdir(self.path_to_folder) if
                       os.path.isfile(os.path.join(self.path_to_folder, f))]
+        self.structures = converted_structures
     def train(self, input_file):
         with open(args.config) as f:
             config = json.load(f)
@@ -944,13 +945,31 @@ class WGANsg:
             self.organism_creator()
         else:
             pass
+
+        try:
+            species_list = [i.specie for i in self.structures[self.num_made - 1]]
+            new_cell = Cell(self.structures[self.num_made - 1].lattice,
+                    species_list,
+                    self.structures[self.num_made - 1].frac_coords)
+            new_org = Organism(new_cell, id_generator, self.name,
+                    composition_space)
+            print('------------------------------------------------------------------------------------------------')
+            print(f'Making organism {new_org.id} with composition {str(new_org.cell.composition)}')
+            self.update_status()
+            return new_org
+        except Exception as e:
+            print(e)
+            self.update_status()
+            return None
+        """
         if self.files[self.num_made - 1].endswith('.cif') or self.files[
                 self.num_made - 1].startswith('POSCAR'):
             try:
 
                 new_cell = Cell.from_file(
-                    str(self.path_to_folder) + '/' + str(
-                        self.files[self.num_made - 1]))
+                os.path.normpath(os.path.join(self.path_to_folder, self.files[self.num_made - 1]))
+                )
+
                 new_org = Organism(new_cell, id_generator, self.name,
                                composition_space)
                 print('------------------------------------------------------------------------------------------------')
@@ -971,6 +990,7 @@ class WGANsg:
             # added # 06/24/2024
             self.update_status()
             return None
+        """
 
     def get_cells(self):
         """
@@ -995,7 +1015,8 @@ class WGANsg:
                     pass
                 """
                 new_cell = Cell.from_file(
-                        str(self.path_to_folder) + "/" + str(cell_file))
+                os.path.normpath(os.path.join(self.path_to_folder, cell_file))
+                )
                 file_cells.append(new_cell)
         return file_cells
 
@@ -1011,3 +1032,5 @@ class WGANsg:
             self.is_finished = True
     def organism_creator(self):
         self.generate(self.input_file)
+        
+
