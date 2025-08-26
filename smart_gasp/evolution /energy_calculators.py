@@ -87,6 +87,7 @@ class VaspEnergyCalculator(object):
         self.num_rerelax = num_rerelax
 
         self.magmom = magmom
+
     def do_energy_calculation(self, organism,
                               composition_space, E_sub_prim=None,
                               n_sub_prim=None, mu_A=0, mu_B=0, mu_C=0,
@@ -138,6 +139,8 @@ class VaspEnergyCalculator(object):
             self.write_poscar(cell, n_sub, sd_index, job_dir_path, no_z=no_z)
         else:
             organism.cell.to(fmt='poscar', filename=job_dir_path + '/POSCAR')
+
+        # kpts_vscale by ACH
         if E_sub_prim is not None and n_sub_prim is not None:
             lkl = Structure.from_file(filename=job_dir_path + '/POSCAR')
             poscar_sub = Structure.from_file(str(os.getcwd())+'/../POSCAR_sub_centered')
@@ -324,6 +327,7 @@ class VaspEnergyCalculator(object):
 
         return organism
 
+
     def write_poscar(self, iface, n_sub, sd_index, job_dir_path, no_z=False):
         '''
         Writes POSCAR of the interface with sd flags and comment line in job dir
@@ -383,6 +387,7 @@ class VaspEnergyCalculator(object):
             os.remove(job_dir_path+'/CHGCAR')
         except:
             print('no WAVECAR or CHGCAR')
+
 class LammpsEnergyCalculator(object):
     """
     Calculates the energy of an organism using LAMMPS.
@@ -453,6 +458,7 @@ class LammpsEnergyCalculator(object):
         self.write_data_file(organism, job_dir_path, composition_space)
         #print('energy calculator line 441')
         # write out the unrelaxed structure to a poscar file
+
         if E_sub_prim is not None and n_sub_prim is not None:
             #print('energy calculator line 444')
             cell = organism.cell
@@ -478,16 +484,16 @@ class LammpsEnergyCalculator(object):
         #lammps_output = subprocess.check_output(['calllammps', input_script_path], stderr=subprocess.STDOUT)
             # convert from bytes to string (for Python 3)
         #lammps_output = lammps_output.decode('utf-8')
-
-
+        
+        
         except subprocess.CalledProcessError as e:
             # write the output of a bad LAMMPS call to for the user's reference
             with open(job_dir_path + '/log.lammps', 'w') as log_file:
                 log_file.write(e.output.decode('utf-8'))
             print('Error running LAMMPS on organism {} '.format(organism.id))
-
+           
             return None
-
+        
         # write the LAMMPS output
         with open(job_dir_path + '/log.lammps', 'w') as log_file:
             log_file.write(lammps_output)
@@ -522,7 +528,7 @@ class LammpsEnergyCalculator(object):
             print('Discarding organism {} due to unphysically large energy: '
                   '{} eV/atom.'.format(organism.id, str(epa)))
             return None
-
+        
         if  self.check_lammps_minimization_success(job_dir_path + '/log.lammps'):
             print(f'Discarding organism {organism.id}; lammps calculation unsuccessful')
             return  None
@@ -563,10 +569,25 @@ class LammpsEnergyCalculator(object):
             if len(species_dict.keys()) > 2:
                 num_C = film_species.count(specie_C)
                 ref_en_C = num_C * mu_C
+
             ef = (enthalpy - factor * E_sub_prim - ref_en_A - ref_en_B \
                                             - ref_en_C) / cell_area
+
+            # Set the formation energy from chemical potentials as epa
+            # NOTE: This tricks the algorithm to calculate fitness based on
+            # ef values
             organism.total_energy = enthalpy - factor * E_sub_prim
+            #print ('Setting total_energy of the organism {} with '
+            #       'total_adsorption_energy of the 2D film, {} eV'.format(
+            #       organism.id, organism.total_energy
+            #       ))
             organism.epa = ef
+            #print ('Setting epa of the organism {} with 2D film formation '
+            #       'energy, {} eV/A^2 '.format(organism.id, organism.epa))
+
+        #else:
+            #print('Setting energy of organism {} to {} eV/atom '.format(
+                        #organism.id, organism.epa))
         return organism
 
     def conform_to_lammps(self, cell):
@@ -603,6 +624,7 @@ class LammpsEnergyCalculator(object):
         elif by < cy:
             cell.make_supercell([1, 2, 1])
             self.conform_to_lammps(cell)
+
     def write_data_file(self, organism, job_dir_path, composition_space):
         """
         Writes the file (called in.data) containing the structure that LAMMPS
@@ -656,6 +678,7 @@ class LammpsEnergyCalculator(object):
         if not is_single_element:
             for symbol in element_symbols:
                 elements_dict[symbol] = Element(symbol)
+
          # make a LammpsData object and use it write the in.data file
         force_field = ForceField(elements_dict.items())
         topology = Topology(organism.cell.sites)
@@ -710,6 +733,7 @@ class LammpsEnergyCalculator(object):
         yhi = yhi_bound - max([0.0, yz])
         zlo = zlo_bound
         zhi = zhi_bound
+
         # construct a Lattice object from the lo's and hi's and tilts
         a = [xhi - xlo, 0.0, 0.0]
         b = [xy, yhi - ylo, 0.0]
@@ -755,6 +779,7 @@ class LammpsEnergyCalculator(object):
 
         return Cell(relaxed_lattice, relaxed_symbols, relaxed_cart_coords,
                     coords_are_cartesian=True)
+
     def get_energy(self, lammps_log_path):
         """
         Parses the final energy from the log.lammps file written by LAMMPS.
@@ -813,6 +838,7 @@ class LammpsEnergyCalculator(object):
         poscar = Poscar(iface, comment, selective_dynamics=new_sd)
         poscar.write_file(filename=job_dir_path + '/POSCAR')
 
+
     def check_lammps_minimization_success(self, log_file_path):
         with open(log_file_path, 'r') as f:
             lines = f.readlines()
@@ -826,11 +852,11 @@ class LammpsEnergyCalculator(object):
         if not stopping_lines:
             print("No minimization stopping criteria found in the log file.")
             return
-
+    
         final_criterion = stopping_lines[-1].lower()
 
         if "force tolerance" in final_criterion or "energy tolerance" in final_criterion:
-            return
+            return 
         elif "linesearch alpha is zero" in final_criterion:
             return True
         elif "max number" in final_criterion:
@@ -889,7 +915,7 @@ class GulpEnergyCalculator(object):
         # don't relax any of the lattice parameters
         elif geometry.shape == 'cluster':
             self.lattice_flags = ' 0 0 0 0 0 0'
-            
+
     def get_shells(self):
         """
         Determines whether the anions and cations have shells by looking at the
@@ -1000,6 +1026,7 @@ class GulpEnergyCalculator(object):
         print('Setting energy of organism {} to {} eV/atom '.format(
             organism.id, organism.epa))
         return organism
+
     def write_input_file(self, organism, gin_path):
         """
         Writes the gulp input file.
@@ -1048,6 +1075,7 @@ class GulpEnergyCalculator(object):
             if 'Final Gnorm' in line:
                 line_parts = line.split()
                 return float(line_parts[3])
+
     def get_energy(self, gout):
         """
         Parses the final energy from the GULP output.
@@ -1079,7 +1107,6 @@ class GulpEnergyCalculator(object):
     # it slightly to get it to work.
     # TODO: if pymatgen fixes this method, then I can delete this.
     # Alternatively, could submit a pull request with my fix
-
     def get_relaxed_cell(self, gout):
         # Find the structure lines
         structure_lines = []
@@ -1118,6 +1145,7 @@ class GulpEnergyCalculator(object):
                 break
             else:
                 i += 1
+
         while i < no_lines:
             line = output_lines[i]
             if "Final fractional coordinates of atoms" in line or \
@@ -1163,7 +1191,9 @@ class GulpEnergyCalculator(object):
         latt = Lattice.from_parameters(a, b, c, alpha, beta, gamma)
 
         return Cell(latt, sp, coords)
-        
+
+
+
 class MatterSimEnergyCalculator:
     """
     Calculates the energy of an organism using LAMMPS.
@@ -1180,15 +1210,16 @@ class MatterSimEnergyCalculator:
 
         Precondition: the input script exists and is valid
         """
-
+        
         self.name = 'mattersim'
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.potential = Potential.from_checkpoint(load_path="MatterSim-v1.0.0-5M.pth",device=self.device)
         self.calculator = MatterSimCalculator(load_path="MatterSim-v1.0.0-5M.pth", device=self.device)
-        self.relaxer = Relaxer(optimizer="BFGS",
+        self.relaxer_fire = Relaxer(optimizer="FIRE",
+                                    filter="ExpCellFilter")
+        self.relaxer_bfgs = Relaxer(optimizer="BFGS", 
                                 filter="ExpCellFilter",
                                 constrain_symmetry = False)
-
     def do_energy_calculation(self, organism,
                               composition_space, E_sub_prim=None,
                               n_sub_prim=None, mu_A=0, mu_B=0, mu_C=0,
@@ -1230,18 +1261,23 @@ class MatterSimEnergyCalculator:
                          str(organism.id) + '_unrelaxed')
 
         ase_struct = AseAtomsAdaptor.get_atoms(organism.cell)
-        signal.signal(signal.SIGALRM, self.timeout_handler)
-        signal.alarm(60)
+        #signal.signal(signal.SIGALRM, self.timeout_handler)
+        #print(f'    ---> setting alarm for 60 seconds')
+        #signal.alarm(60)
+
         try:
             dataloader = build_dataloader([ase_struct], only_inference = True)
-            predictions = self.potential.predict_properties(dataloader,include_forces = True,
+            predictions = self.potential.predict_properties(dataloader,include_forces = True, 
                                                             include_stresses = True)
             organism.total_energy = predictions[0][0]
             organism.epa = predictions[0][0]/len(organism.cell)
             ase_struct.calc = self.calculator
-            relaxed_ase = self.relaxer.relax(ase_struct, steps=2000)
+            init_relax = self.relaxer_fire.relax(ase_struct,
+                                                steps=500,
+                                                fmax=0.025)
+            relaxed_ase = self.relaxer_bfgs.relax(init_relax[1], steps=500)
             relaxed_structure = AseAtomsAdaptor.get_structure(relaxed_ase[1])
-            organism.cell = relaxed_structure
+            organism.cell = relaxed_structure 
             organism.cell.to(fmt='poscar', filename=job_dir_path + '/POSCAR.' + str(organism.id) + '_relaxed')
             torch.cuda.empty_cache()
         except Exception as e:
@@ -1249,9 +1285,10 @@ class MatterSimEnergyCalculator:
             print(f"Error running mattersim on organism {organism.id}: {e}")
             return None
 
-        finally:
-            signal.alarm(0)
-
+        #finally:
+            #print(f'    ---> resetting alarm')
+            #signal.alarm(0)
+        
         return organism
 
     def timeout_handler(self, signum, frame):
