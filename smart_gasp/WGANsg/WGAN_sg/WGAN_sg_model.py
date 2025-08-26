@@ -38,6 +38,7 @@ def build_generator(png_dim1,png_dim2,input_dim):
     model.add(Conv2D(1, 4, padding='same', activation='sigmoid'))
 
     return model
+
 def build_discriminator(png_dim1,png_dim2):
     model = Sequential()
     model.add(Conv2D(32, 4, input_shape = (png_dim1,png_dim2,1)))
@@ -62,7 +63,6 @@ def build_discriminator(png_dim1,png_dim2):
     model.add(Dense(1))
 
     return model
-
 
 gpus = tf.config.list_physical_devices('GPU')
 cpus = tf.config.list_physical_devices('CPU')
@@ -138,3 +138,4 @@ with tf.device(device):
             self.g_opt.apply_gradients(zip(ggrad, self.generator.trainable_variables))
 
             return {"d_loss":total_d_loss, "g_loss":total_g_loss}
+
