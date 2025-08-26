@@ -1,5 +1,5 @@
 print('===================================================================================================')
-print('                                   Beginning SMART-GASP Search                                     ')
+print('                                   Beginning DEEP-GASP Search                                      ')
 print('===================================================================================================')
 from .population import organism_creators
 from .population import population
