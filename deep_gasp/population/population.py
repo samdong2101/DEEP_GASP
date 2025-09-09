@@ -875,7 +875,7 @@ class Pool(object):
             num_comps = len(list(set([o.cell.composition for o in self.queue])))
             with open(os.getcwd() + '/convex_hull_data','a') as f:
                 line = (
-                f"{'convex hull area  --':<21}{0.000000:<22.6f}"
+                f"{'convex hull  --':<21}{0.000000:<22.6f}"
                 f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
                 f"{'average value  --':<18}{average_value:<22.6f}"
                 f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
@@ -889,7 +889,7 @@ class Pool(object):
 
 
                 line = (
-    f"{'convex hull area  --':<21}{convex_hull.area:<22.6f}"
+    f"{'convex hull --':<21}{convex_hull.area:<22.6f}"
     f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
     f"{'average value  --':<18}{average_value:<22.6f}"
     f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
@@ -906,7 +906,7 @@ class Pool(object):
             with open(os.getcwd() + '/convex_hull_data','a') as f:
 
                 line = (
-    f"{'convex hull volume  --':<21}{convex_hull.volume:<22.6f}"
+    f"{'convex hull --':<21}{convex_hull.volume:<22.6f}"
     f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
     f"{'average value  --':<18}{average_value:<22.6f}"
     f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
