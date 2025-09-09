@@ -1261,23 +1261,20 @@ class MatterSimEnergyCalculator:
                          str(organism.id) + '_unrelaxed')
 
         ase_struct = AseAtomsAdaptor.get_atoms(organism.cell)
-        #signal.signal(signal.SIGALRM, self.timeout_handler)
-        #print(f'    ---> setting alarm for 60 seconds')
-        #signal.alarm(60)
 
         try:
-            dataloader = build_dataloader([ase_struct], only_inference = True)
-            predictions = self.potential.predict_properties(dataloader,include_forces = True, 
-                                                            include_stresses = True)
-            organism.total_energy = predictions[0][0]
-            organism.epa = predictions[0][0]/len(organism.cell)
             ase_struct.calc = self.calculator
             init_relax = self.relaxer_fire.relax(ase_struct,
                                                 steps=500,
                                                 fmax=0.025)
             relaxed_ase = self.relaxer_bfgs.relax(init_relax[1], steps=500)
+            dataloader = build_dataloader([relaxed_ase[1]],only_inference = True)
+            predictions = self.potential.predict_properties(dataloader,include_forces = False,
+                                                            include_stresses = False)
+            organism.total_energy = predictions[0][0]
+            organism.epa = predictions[0][0]/len(organism.cell)
             relaxed_structure = AseAtomsAdaptor.get_structure(relaxed_ase[1])
-            organism.cell = relaxed_structure 
+            organism.cell = relaxed_structure
             organism.cell.to(fmt='poscar', filename=job_dir_path + '/POSCAR.' + str(organism.id) + '_relaxed')
             torch.cuda.empty_cache()
         except Exception as e:
