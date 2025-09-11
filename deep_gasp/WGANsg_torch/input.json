@@ -1,0 +1,14 @@
+{"structures_path":"/blue/hennig/sam.dong/mp_list_07_21_2025.pkl",
+"elem_list": ["Zr","Cu","Al"],
+"max_atoms":12,
+"min_atoms":1,
+  "g_lr": 0.0002,
+  "c_lr": 0.000077,
+  "epochs_inner": 100,
+  "epochs_outer":100,
+  "batch_size": 64,
+  "generator_weights_path":"/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/deep_gasp/WGANsg_torch/checkpoints/",
+  "pretrained_path": "/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/deep_gasp/WGANsg_torch/checkpoints/ZrCuAl_2-12_atoms_5000_epochs_final.pth",
+  "num_images": 150,
+  "poscar_path":"/blue/hennig/sam.dong/SMART_gasp/GASP-python/smart_gasp/WGANsg/init_population/"
+  }
