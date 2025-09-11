@@ -13,12 +13,13 @@ import os
 import numpy as np
 import time
 import tensorflow as tf
-from deep_gasp.WGANsg.featurize import struct2img
-from deep_gasp.WGANsg.post_process import img2struct
+from deep_gasp.WGANsg_torch.featurize import struct2img
+from deep_gasp.WGANsg_torch.post_process import img2struct
 import json
 import pickle
-from deep_gasp.WGANsg.WGAN_sg import WGAN_sg_model
+from deep_gasp.WGANsg_torch.WGAN_sg import WGAN_sg_model
 import shutil
+import torch
 #from __future__ import division, unicode_literals, print_function
 print('organism creator inputs done')
 
@@ -759,6 +760,7 @@ class WGANsg:
         self.is_successes_based = False  # it's based on number attempted
         self.is_finished = False
         self.path = None
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print('================================================================================================')
         print(f'Creating organisms with {self.name}...')
         print('================================================================================================')
@@ -800,7 +802,6 @@ class WGANsg:
     def generate(self, input_file):
         with open(input_file) as f:
             config = json.load(f)
-
         structures_path = config.get("structures_path")
         elem_list = config.get("elem_list")
         max_atoms = config.get("max_atoms")
@@ -814,16 +815,15 @@ class WGANsg:
         structs = pre_process.preprocess_data()
         png = struct2img.PNGrepresentation(structs,None)
         pngs,png_dim1,png_dim2,divisor_list,factor_list = png.featurize()
-        try:
-            os.mkdir(poscar_path)
-        except:
-            shutil.rmtree(poscar_path)
-            os.mkdir(poscar_path)
-        generator = WGAN_sg_model.build_generator(png_dim1,png_dim2,64)
-        generator.load_weights(pretrained_path)
+        generator = WGAN_sg_model.Generator(png_dim1,png_dim2,64).to(self.device)
+        generator.load_state_dict(torch.load(pretrained_path, map_location=self.device))
         then = time.time()
-        gen_images = generator(tf.random.normal((num_images,64,1)), training=True)
-        gen_images = gen_images.numpy()
+        z = torch.randn((num_images,1,64),device = self.device)
+        gen_images = generator(z)
+        gen_images = gen_images.squeeze(1)
+        gen_images = gen_images.detach().cpu().numpy()
+        divisor_list = divisor_list.detach().cpu().numpy()
+        factor_list = np.array(factor_list)
         rescaled_images = self.rescale_images(gen_images,divisor_list,factor_list)
         convert = img2struct.POSCAR(rescaled_images,elem_list,poscar_path)
         converted_structures = convert.convert_to_poscars()
@@ -834,87 +834,9 @@ class WGANsg:
         self.files = [f for f in os.listdir(self.path_to_folder) if
                       os.path.isfile(os.path.join(self.path_to_folder, f))]
         self.structures = converted_structures
+        self.max_num_organisms = num_images
     def train(self, input_file):
-        with open(args.config) as f:
-            config = json.load(f)
-        structures_path = config.get("structures_path")
-        elem_list = config.get("elem_list")
-        max_atoms = config.get("max_atoms")
-        min_atoms = config.get("min_atoms")
-        batch_size = config.get("batch_size")
-        g_lr = config.get("g_lr")
-        c_lr = config.get("c_lr")
-        outer_epoch = config.get("epochs_outer")
-        inner_epoch = config.get("epochs_inner")
-        generator_weight_path = config.get("generator_weights_path")
-        num_images = config.get("num_images")
-        poscar_path = config.get("poscar_path")
-
-        try:
-            os.mkdir(generator_weight_path)
-        except:
-            pass
-
-        print('-- loading structures...')
-        with open(structures_path, "rb") as f:
-            structures = pickle.load(f)
-
-        pre_process = struct2img.PreprocessData(structures,elem_list,max_atoms,min_atoms)
-        structs = pre_process.preprocess_data()
-        png = struct2img.PNGrepresentation(structs,None)
-        pngs,png_dim1,png_dim2,divisor_list,factor_list = png.featurize()
-
-        generator = WGAN_sg_model.build_generator(png_dim1,png_dim2,input_dim = 64)
-        discriminator = WGAN_sg_model.build_discriminator(png_dim1,png_dim2)
-        g_opt = tf.keras.optimizers.RMSprop(learning_rate = g_lr)
-        d_opt = tf.keras.optimizers.RMSprop(learning_rate = c_lr)
-        g_loss = WGAN_sg_model.BinaryCrossentropy()
-        d_loss = WGAN_sg_model.BinaryCrossentropy()
-        gans = WGAN_sg_model.GANS(generator,discriminator,input_dim = 64)
-        gans.compile(g_opt,d_opt,g_loss,d_loss)
-        batched_data = gans.batch_data(pngs,batch_size)
-
-        emds = []
-        now_old = str(datetime.now()).replace(' ','_')
-        os.chdir('/blue/hennig/sam.dong/GANs/gans_scripts/nvvm/libdevice')
-        for i in range(outer_epoch):
-            print(f'epoch {i*inner_epoch}')
-            gen_image_coords = []
-            real_image_coords = []
-            num_atoms = 2
-            hist = gans.fit(batched_data,
-                            epochs=inner_epoch,
-                            batch_size = batch_size)
-            gen_images = generator(tf.random.normal((num_images,64,1)), training=True)
-            gen_images = gen_images.numpy()
-            real_images = random.sample(pngs,num_images)
-            generated_images = rescale_images(gen_images,divisor_list,factor_list)
-            real_images = rescale_images(real_images,divisor_list,factor_list)
-            elem_list = pre_process.elem_list
-            gen_dims = extract_dims(generated_images,elem_list = elem_list)
-            real_dims = extract_dims(real_images,elem_list = elem_list)
-            gen_coords = extract_coords(generated_images,gen_dims,num_atoms)
-            real_coords = extract_coords(real_images,gen_dims,num_atoms)
-            x_gen,y_gen,z_gen = pool_coords(gen_coords)
-            x_real,y_real,z_real = pool_coords(real_coords)
-            emd_x = wasserstein_distance(x_real.flatten(),x_gen.flatten())
-            emd_y = wasserstein_distance(y_real.flatten(),y_gen.flatten())
-            emd_z = wasserstein_distance(z_real.flatten(),z_gen.flatten())
-            try:
-                emd_means = [np.mean(emd) for emd in emds]
-                emd_means_sorted = np.sort(emd_means)
-                if np.mean([emd_x,emd_y,emd_z]) < emd_means_sorted[0]:
-                    [os.remove(generator_weight_path + f) for f in os.listdir(generator_weight_path) if now_old in f]
-                    now = str(datetime.now()).replace(' ','_')
-                    print(f'-- saving generator weights with tag {now}')
-                    generator.save_weights(f'{generator_weight_path}/{"".join(elem_list)}_{min_atoms}-{max_atoms}_atoms_{now}.h5')
-                    now_old = now
-
-            except Exception as e:
-                print('-- first iteration, no available data')
-            emds.append([emd_x,emd_y,emd_z])
-        generator.save_weights(f'{generator_weight_path}/{"".join(elem_list)}_{min_atoms}-{max_atoms}_atoms_final_{now}.h5')
-        print('-- training complete!!!')
+        raise NotImplementedError
 
     def create_organism(self, id_generator, composition_space, constraints,
                         random):
