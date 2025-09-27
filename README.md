@@ -1,7 +1,6 @@
 # DEEP-GASP
 This repository contains the code of the **DEEP-GASP** algorithm, an end-to-end machine learning integrated genetic algorithm for crystal structure prediction, containing a Wasserstein Generative Adversarial Network Structure Generator (WGANsg) 
-for population initia<img width="793" height="366" alt="deep_gasp_workflow" src="https://github.com/user-attachments/assets/da3bafa5-713c-4b7e-858c-b6ddee33fa5d" />
-lization and tournament based scoring/selection (TBS) of candidate offspring organisms through equivariant graph based score networks via MatterSim. 
+for population initialization and tournament based scoring/selection (TBS) of candidate offspring organisms through equivariant graph based score networks via MatterSim. 
 
 
 <img width="2500" height="1142" alt="deep_gasp_workflow_github" src="https://github.com/user-attachments/assets/9021bb0a-6bb1-433d-aa3f-264a9a0e3075" />
