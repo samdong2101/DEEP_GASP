@@ -30,7 +30,7 @@ from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import Element, Specie
 from pymatgen.transformations.standard_transformations import \
     RotationTransformation
-
+from pymatgen.core import Structure
 import copy
 import numpy as np
 import warnings
