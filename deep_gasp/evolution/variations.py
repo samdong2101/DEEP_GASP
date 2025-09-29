@@ -228,8 +228,8 @@ class Mating:
         parent1 = pool.select_organism(random, composition_space)
         parent2 = pool.select_organism(random, composition_space,
                                        excluded_org=parent1)
-        cell_1 = copy.deepcopy(parent1.cell)
-        cell_2 = copy.deepcopy(parent2.cell)
+        cell_1 = Structure.from_dict(parent1.cell.as_dict())
+        cell_2 = Structure.from_dict(parent2.cell.as_dict())
 
         # For interface goemetry, get the primitive cells of either one or
         # both the parent cells. This is to allow large area low energy
@@ -888,8 +888,8 @@ class StructureMut(object):
 
         # select a parent organism from the pool and get its cell
         parent_org = pool.select_organism(random, composition_space)
-        cell = copy.deepcopy(parent_org.cell)
-
+        #cell = copy.deepcopy(parent_org.cell)
+        cell = Structure.from_dict(parent_org.cell.as_dict())
         # perturb the site coordinates
         self.perturb_atomic_coords(cell, geometry, constraints, random)
 
@@ -1146,7 +1146,8 @@ class NumAtomsMut(object):
 
         # select a parent organism from the pool and get its cell
         parent_org = pool.select_organism(random, composition_space)
-        cell = copy.deepcopy(parent_org.cell)
+        #cell = copy.deepcopy(parent_org.cell)
+        cell = Structure.from_dict(parent_org.cell.as_dict())
         parent_vol_per_atom = copy.deepcopy(cell.lattice.volume/cell.num_sites)
 
         # compute a valid, non-zero number of atoms (or stoichiometries) to add
@@ -1489,8 +1490,8 @@ class Permutation(object):
             return None
 
         # get a copy of the parent organism's cell
-        cell = copy.deepcopy(parent_org.cell)
-
+        #cell = copy.deepcopy(parent_org.cell)
+        cell = Structure.from_dict(parent_org.cell.as_dict())
         # compute a positive random number of swaps to do
         num_swaps = int(round(random.gauss(self.mu_num_swaps,
                                            self.sigma_num_swaps)))
