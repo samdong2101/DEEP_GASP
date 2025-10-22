@@ -1,4 +1,4 @@
-# coding: utf-8
+#coding: utf-8
 # Copyright (c) Henniggroup.
 # Distributed under the terms of the MIT License.
 
@@ -24,7 +24,7 @@ organisms. All variation classes must implement a do_variation() method.
 
 """
 
-from deep_gasp.general import Organism, Cell
+from deep_gasp.general import SymOrganism, Organism, Cell
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import Element, Specie
@@ -40,6 +40,862 @@ from mattersim.forcefield.potential import MatterSimCalculator
 from mattersim.forcefield.potential import Potential
 from mattersim.datasets.utils.build import build_dataloader
 from mattersim.applications.relax import Relaxer
+import hydra
+import torch
+from torch import nn, optim
+from torch.utils.data import DataLoader, Dataset
+from deep_gasp.vae_mating.pl_modules import decoder, gnn, model
+from deep_gasp.vae_mating.pl_modules.model import CDVAE
+import pytorch_lightning as pl
+import yaml
+from deep_gasp.vae_mating.pl_data import dataset, datamodule
+from torch_geometric.loader import DataLoader
+from omegaconf import DictConfig, OmegaConf
+import omegaconf
+from sklearn.preprocessing import StandardScaler
+from deep_gasp.vae_mating.cdvae.common.data_utils import (
+    EPSILON, cart_to_frac_coords, mard, lengths_angles_to_volume,
+    frac_to_cart_coords, min_distance_sqr_pbc)
+import pandas as pd
+from pymatgen.core import Structure
+import sys
+from types import SimpleNamespace
+from datetime import datetime
+from pymatgen.core import Lattice, Structure
+import numpy as np
+from pymatgen.core.periodic_table import Element
+import pickle
+from pymatgen.analysis.structure_matcher import StructureMatcher
+from deep_gasp.vae_mating.utils import write_file
+from mattersim.forcefield import MatterSimCalculator
+from pymatgen.io.ase import AseAtomsAdaptor
+from mattersim.applications.relax import Relaxer
+import copy
+import os
+import random
+import string
+from hydra import initialize, compose
+from omegaconf import OmegaConf
+from pymatgen.core.periodic_table import Element
+from pyxtal.symmetry import Group, index_from_letter
+class SimpleModel(nn.Module):
+    def __init__(self,*args,**kwargs):
+
+        cfg = OmegaConf.load("../deep_gasp/vae_mating/conf/model/vae.yaml")
+        encoder_cfg = OmegaConf.load(
+    "../deep_gasp/vae_mating/conf/model/encoder/dimenet.yaml")
+        super().__init__(*args,**kwargs)
+        self.encoder = gnn.DimeNetPlusPlusWrap(128,encoder_cfg.num_targets,
+                encoder_cfg.num_blocks,encoder_cfg.int_emb_size,
+                encoder_cfg.basis_emb_size,encoder_cfg.out_emb_channels,
+                encoder_cfg.num_spherical, encoder_cfg.num_radial,
+                encoder_cfg.cutoff, encoder_cfg.envelope_exponent,
+                encoder_cfg.num_before_skip, encoder_cfg.num_after_skip,
+                encoder_cfg.num_output_layers)
+        self.decoder = decoder.GemNetTDecoder(hidden_dim = 128,
+                latent_dim = 256, max_neighbors = 20,
+                radius = 6.0, scale_file = '/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/deep_gasp/vae_mating/pl_modules/gemnet/gemnet-dT.json')
+
+
+
+        self.cdvae = CDVAE(encoder = self.encoder, decoder = self.decoder,
+                hparams = cfg)
+
+
+class VAE_mating:
+    def __init__(self,checkpoint,mating_params):
+        print('variations dir:', os.getcwd())
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
+        with initialize(config_path = "../vae_mating/conf"):
+            cfg = compose(config_name='default')
+        self.config = cfg
+        print('variations dir:', os.getcwd())
+        #self.parents = parents
+        self.fraction = mating_params['fraction']
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.ga_datamodule = hydra.utils.instantiate(self.config.mating.datamodule, _recursive_ = False)
+        self.checkpoint = checkpoint
+        self.name = 'embedding'
+    def write_file(self,parents):
+        rows = []
+        for i, struct in enumerate(parents):
+            row = {
+        "material_id": i,
+        "formation_energy_per_atom": 0,  # example
+        "band_gap": 0,
+        "pretty_formula": struct.composition.reduced_formula,
+        "e_above_hull": 0,
+        "elements": str(list(struct.symbol_set)),
+        "cif": struct.to(fmt="cif"),
+        "spacegroup.number": struct.get_space_group_info()[1]
+            }
+            rows.append(row)
+        df = pd.DataFrame(rows)
+        df.to_csv('/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/deep_gasp/vae_mating/data/mating/ga.csv')
+        
+    def perform_mating(self, parents, checkpoint_path,composition_space):
+        
+        datamodule = self.ga_datamodule
+        model = SimpleModel().to(self.device)
+        print('checkpoint_path:',checkpoint_path)
+        model.cdvae.load_state_dict(torch.load(checkpoint_path))
+        model.cdvae.eval()
+        model.cdvae.lattice_scaler = datamodule.lattice_scaler.copy()
+        loader = datamodule.train_dataloader()
+        batch = next(iter(loader))
+        zs = model.cdvae.encoder(batch.to(self.device))
+        offspring_z = self.crossover(zs,n=1)
+        ld_kwargs = SimpleNamespace(n_step_each = 20, step_lr = 0.001, min_sigma = 0.001, 
+                save_traj = True, disable_bar = True) 
+        zs = torch.randn(zs.shape,device = self.device)
+        offspring_stats = model.cdvae.langevin_dynamics(zs,ld_kwargs)
+        offspring_cell = self.create_struct_from_stats(offspring_stats, parents, composition_space)
+        return offspring_cell 
+
+    def agg(self, zs):
+        child = torch.stack([torch.mean(zs, dim=0), torch.mean(zs, dim=0)], dim=0)
+        return child
+
+    def crossover(self, zs, n=2):
+        p1 = zs[0]
+        p2 = zs[1]
+        assert p1.shape == p2.shape
+        L = p1.numel()
+        pts = torch.sort(torch.randperm(L-1)[:n] + 1).values.tolist() + [L]
+        kids, last, swap = ([], []), 0, False
+        for p in pts:
+            kids[0].append(p1[last:p] if not swap else p2[last:p])
+            kids[1].append(p2[last:p] if not swap else p1[last:p])
+            swap, last = not swap, p
+        return torch.stack([torch.cat(kids[0]), torch.cat(kids[1])], dim=0)
+
+    def create_struct_from_stats(self, stats, parents=None,composition_space=None):
+        num_atoms_list = stats['num_atoms'].detach().cpu()      
+        lengths_list = stats['lengths'].detach().cpu()            
+        angles_list = stats['angles'].detach().cpu()              
+        frac_coords_all = stats['frac_coords'].detach().cpu()
+        atom_types = stats['atom_types'].detach().cpu()
+        #ref_atom_types = set(sum([list(i.atomic_numbers) for i in parents],[])) 
+        symbols = [str(i.elements[0]) for i in composition_space.endpoints]
+        ref_atom_types = [Element(s).Z for s in symbols]
+        structures = []
+        atom_index = 0
+
+        for i, num_atoms in enumerate(num_atoms_list):
+            lengths = lengths_list[i].detach().cpu()
+            angles = angles_list[i].detach().cpu()
+            lattice = Lattice.from_parameters(lengths[0],lengths[1],lengths[2],
+                    angles[0],angles[1],angles[2])
+            atomic_numbers = self.map_to_reference(np.array(atom_types),list(ref_atom_types))
+            species = [Element.from_Z(Z).symbol for Z in atomic_numbers][atom_index:atom_index + num_atoms]
+            coords = frac_coords_all[atom_index:atom_index + num_atoms]
+            atom_index += num_atoms
+            struct = Structure(lattice, species, coords)
+            structures.append(struct)
+
+        return structures
+
+
+    def map_to_reference(self, predicted, reference):
+        """
+        Map predicted atomic numbers to the closest numbers in reference.
+
+        Args:
+            predicted (array-like): predicted atomic numbers, shape (N,) or (batch, N)
+            reference (array-like): reference atomic numbers, shape (M,)
+
+        Returns:
+            np.ndarray: array of same shape as predicted with closest reference numbers
+        """
+        predicted = np.array(predicted)
+        reference = np.array(reference)
+
+        # Flatten predicted array to simplify indexing if needed
+        original_shape = predicted.shape
+        predicted_flat = predicted.flatten()
+
+        # Compute absolute differences between predicted numbers and reference
+        # Shape: (num_predicted, num_reference)
+        diff = np.abs(predicted_flat[:, None] - reference[None, :])
+
+        # Find index of closest reference for each predicted number
+        closest_idx = np.argmin(diff, axis=1)
+
+        # Map predicted numbers to closest reference numbers
+        mapped_flat = reference[closest_idx]
+
+        # Reshape to original shape of predicted
+        mapped = mapped_flat.reshape(original_shape)
+
+        return mapped
+
+    
+    def do_variation(self,pool, random, geometry, constraints, id_generator,
+            composition_space):
+        parent1 = pool.select_organism(random,composition_space)
+        parent2 = pool.select_organism(random,composition_space, excluded_org = parent1)
+        cell_1 = Structure.from_dict(parent1.cell.as_dict())
+        cell_2 = Structure.from_dict(parent2.cell.as_dict())
+        parents = [cell_1,cell_2]
+        offspring_cell = self.perform_mating(parents,self.checkpoint,composition_space)
+        offsprings = []
+        for cell in offspring_cell:
+            offspring = Organism(cell, id_generator, self.name,
+                             composition_space)
+            offsprings.append(offspring)
+        return offsprings[0]
+    
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
+
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
+
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat 
+    def calculate_scores(self, batch, compositions, predictions, pd, composition_space):
+        entries = []
+        for i in range(len(compositions)):
+            try:
+                entry = ComputedEntry(compositions[i],predictions[i])
+                transformed_entry = pd.transform_entries([entry],composition_space.endpoints)[0][0]
+                e_above_hull = pd.get_e_above_hull(transformed_entry)
+                entries.append([batch[i],compositions[i],e_above_hull])
+            except Exception as e:
+
+                pass
+        sorted_entries = sorted(entries,key = lambda x: x[2])
+        print([sorted_entry[1],sorted_entry[2]] for sorted_entry in sorted_entries)
+        if len(entries) == 0:
+            return None,None
+        try:
+            random_ind = np.random.randint(len(sorted_entries[0:5]))
+        except:
+            random_ind = np.random.randint(len(sorted_entries)+1//2)
+        #print('------------------------------------------------------------------------------------------------')
+        print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
+        return sorted_entries[0][0],sorted_entries[0][2]
+
+
+class SymmetryMating:
+
+    def __init__(self,mating_params):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
+        self.name = "mating"
+        self.fraction = mating_params['fraction']
+        self.wyckoff_dict = {letter: -i for i, letter in enumerate(string.ascii_lowercase, start=1)}
+        M_triclinic = np.array([
+            [1, 0, 0, 0],  # α free
+            [0, 1, 0, 0],  # β free
+            [0, 0, 1, 0],  # γ free
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_monoclinic = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 1, 0, 0],   # β free
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_orthorhombic = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 0, 0, 90],  # β = 90°
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_tetragonal = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 0, 0, 90],  # β = 90°
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_trigonal = np.array([
+            [0, 0, 0, 90],
+            [0, 0, 0, 90],
+            [0, 0, 0, 120],
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_hexagonal = M_trigonal.copy()
+        M_cubic = M_orthorhombic.copy()
+        crystal_systems = {
+            "triclinic": (1, 2, M_triclinic),
+            "monoclinic": (3, 15, M_monoclinic),
+            "orthorhombic": (16, 74, M_orthorhombic),
+            "tetragonal": (75, 142, M_tetragonal),
+            "trigonal": (143, 167, M_trigonal),
+            "hexagonal": (168, 194, M_hexagonal),
+            "cubic": (195, 230, M_cubic),
+        }
+        self.angles_matrix = {}
+        for name, (start, end, matrix) in crystal_systems.items():
+            for sg in range(start, end + 1):
+                self.angles_matrix[sg] = matrix
+        # Triclinic, monoclinic, orthorhombic: all free parameters
+        M_free = np.array([
+            [1, 0, 0, 0],  # a free
+            [0, 1, 0, 0],  # b free
+            [0, 0, 1, 0],  # c free
+            [0, 0, 0, 1]
+        ], dtype=float)
+        
+        # Tetragonal & hexagonal & trigonal (hexagonal setting): a = b, c free
+        # Set a_out = a, b_out = a, c_out = c
+        M_a_equal_b = np.array([
+            [1, 0, 0, 0],  # a_out = a
+            [1, 0, 0, 0],  # b_out = a (force equality)
+            [0, 0, 1, 0],  # c_out = c
+            [0, 0, 0, 1]
+        ], dtype=float)
+        
+        # Cubic: a = b = c
+        # Set a_out = a, b_out = a, c_out = a
+        M_a_equal_b_equal_c = np.array([
+            [1, 0, 0, 0],  # a_out = a
+            [1, 0, 0, 0],  # b_out = a
+            [1, 0, 0, 0],  # c_out = a
+            [0, 0, 0, 1]
+        ], dtype=float)
+        # Map space group ranges to matrices
+        crystal_systems_lattice = {
+            "triclinic": (1, 2, M_free),
+            "monoclinic": (3, 15, M_free),
+            "orthorhombic": (16, 74, M_free),
+            "tetragonal": (75, 142, M_a_equal_b),
+            "trigonal": (143, 167, M_a_equal_b),
+            "hexagonal": (168, 194, M_a_equal_b),
+            "cubic": (195, 230, M_a_equal_b_equal_c),
+        }
+        
+        # Generate dictionary
+        self.cell = None
+        self.constants_matrix = {}
+        for name, (start, end, matrix) in crystal_systems_lattice.items():
+            for sg in range(start, end + 1):
+                self.constants_matrix[sg] = matrix
+
+    def furthest_point_pbc(self, points, grid_resolution=50):
+        """
+        Find the point in fractional crystal coordinates (0-1 in each axis)
+        that is furthest from all given points, considering periodic boundary conditions.
+        
+        points: np.array of shape (N,3), values in [0,1]
+        grid_resolution: number of points per axis to sample
+        """
+        if len(points) == 0:
+            return np.array([0,0,0])
+        points = np.array(points)
+        
+        # Generate candidate grid points within unit cell
+        x = np.linspace(0, 1, grid_resolution)
+        y = np.linspace(0, 1, grid_resolution)
+        z = np.linspace(0, 1, grid_resolution)
+        xv, yv, zv = np.meshgrid(x, y, z, indexing='ij')
+        candidates = np.stack([xv.ravel(), yv.ravel(), zv.ravel()], axis=1)
+    
+        # Compute pairwise fractional differences with periodic boundary conditions
+        diff = candidates[:, np.newaxis, :] - points[np.newaxis, :, :]
+        diff -= np.round(diff)  # Wrap differences into [-0.5, 0.5] range
+    
+        # Compute minimum image distances
+        dist_matrix = np.linalg.norm(diff, axis=2)
+    
+        # Minimum distance from each candidate to any existing point
+        min_dists = dist_matrix.min(axis=1)
+    
+        # Pick candidate with maximum minimum distance
+        idx = np.argmax(min_dists)
+        return candidates[idx]
+
+
+    def do_variation(self, pool, random, geometry, constraints, id_generator,
+                     composition_space):
+        
+        parent1 = pool.select_organism(random, composition_space)
+        parent2 = pool.select_organism(random, composition_space,
+                                       excluded_org=parent1)
+        cell_1 = Structure.from_dict(parent1.cell.as_dict())
+        cell_2 = Structure.from_dict(parent2.cell.as_dict())
+        relative_wp1 = list(parent1.relative_wyckoffs)
+        relative_wp2 = list(parent2.relative_wyckoffs)
+        sg1 = parent1.space_group
+        sg2 = parent2.space_group
+        sg_offspring = int(np.round(np.mean([sg1,sg2])))
+        cutoff1 = random.randint(0,len(relative_wp1)-1)
+        cutoff2 = random.randint(0,len(relative_wp2)-1)
+        offspring_wp1 = relative_wp1[:cutoff1] + relative_wp2[cutoff2:]
+        offspring_wp2 = relative_wp1[:cutoff2] + relative_wp2[cutoff1:]
+        child1_species = parent1.cell.species[:cutoff1] + parent2.cell.species[cutoff2:]
+        child2_species = parent1.cell.species[:cutoff2] + parent2.cell.species[cutoff1:]
+        if len(offspring_wp1) > 0:
+            relative_wp = offspring_wp1
+            offspring_species = child1_species
+        else:
+            relative_wp = offspring_wp2
+            offspring_species = child2_species
+        prod = np.round(np.array(relative_wp)*len(Group(sg_offspring)))
+        offspring_wp = [Group(sg_offspring).Wyckoff_positions[-int(i)].letter for i in prod]
+        merged_constants = np.insert(np.mean(np.array([parent1.cell.lattice.abc,parent2.cell.lattice.abc]),axis = 0),3,1)
+        lattice_constants = np.matmul(self.constants_matrix[sg_offspring],merged_constants)
+        merged_angles = np.insert(np.mean(np.array([parent1.cell.lattice.angles,parent2.cell.lattice.angles]),axis = 0),3,1)
+        lattice_angles = np.matmul(self.angles_matrix[sg_offspring],merged_angles)
+        positions = []
+        indices = [self.wyckoff_dict[i.lower()] for i in offspring_wp]
+        for i,idx in enumerate(np.sort(indices)[::-1]):
+            try:
+                position = Group(sg_offspring).Wyckoff_positions[idx]
+            except:
+                position = Group(sg_offspring).Wyckoff_positions[0]
+            positions.append(position)
+        
+        wp_dict = {np.sort(offspring_wp)[i]: 0 for i in range(len(offspring_wp))}
+        coords = []
+        for i,position in enumerate(positions): 
+            has_free_param = np.any(np.array(position[0].as_dict()['matrix'])[:, :3] !=0)
+            wyckoff_letter = np.sort(offspring_wp)[i]
+            try:
+                if not has_free_param:
+                    M_coord = position[wp_dict[wyckoff_letter]].as_dict()['matrix']
+                    coord = np.ones(4)
+                    pred_coord = np.matmul(M_coord,coord)[:3]
+                    coords.append(pred_coord)
+                    wp_dict[wyckoff_letter] += 1
+                else:
+                    M_coord = position[wp_dict[wyckoff_letter]].as_dict()['matrix']
+                    furthest_coord = np.insert(self.furthest_point_pbc(coords,grid_resolution = 50),3,1)
+                    pred_coord = np.matmul(M_coord,furthest_coord)[:3]
+                    coords.append(pred_coord)
+                    wp_dict[wyckoff_letter] += 1
+            
+            except Exception as e:
+                M_coord = Group(sg_offspring).Wyckoff_positions[0][0].as_dict()['matrix']
+                furthest_coord = np.insert(self.furthest_point_pbc(coords,grid_resolution = 50),3,1)
+                pred_coord = np.matmul(M_coord,furthest_coord)[:3]
+                coords.append(pred_coord)
+            
+        coords = np.array(coords)%1
+        cell = self.create_cell(offspring_species, coords, np.array([lattice_constants[:3],lattice_angles[:3]]).reshape(6,))
+        org = SymOrganism(cell,id_generator, self.name, composition_space, sg_offspring, offspring_wp, relative_wp)
+        return org 
+
+
+    def create_cell(self, species_list, coords, lattice_params):
+        frac_coords = np.array(coords, dtype=float)
+        lattice_params = np.array(lattice_params, dtype=float)
+        if lattice_params.shape == (3, 3):
+            lattice = Lattice(lattice_params)
+        elif lattice_params.size == 6:
+            a, b, c, alpha, beta, gamma = lattice_params
+            lattice = Lattice.from_parameters(a, b, c, alpha, beta, gamma)
+        else:
+            raise ValueError("lattice_info must be 3x3 matrix or [a,b,c,alpha,beta,gamma]")
+        structure = Structure(lattice, species_list, frac_coords)
+        return structure
+
+
+
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
+
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
+
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat
+
+
+
+
+    def looped(self, pool, random, geometry, constraints, id_generator,
+            composition_space, n):
+        candidates = [self.do_variation(pool, random, geometry, constraints, id_generator, composition_space) for i in range(n)]
+        self.candidates = candidates
+        return candidates
+
+    def calculate_scores(self, batch, compositions, predictions, pd, composition_space):
+        entries = []
+
+        for i in range(len(compositions)):
+            try:
+                entry = ComputedEntry(compositions[i],predictions[i])
+                transformed_entry = pd.transform_entries([entry],composition_space.endpoints)[0][0]
+                e_above_hull = pd.get_e_above_hull(transformed_entry)
+                entries.append([batch[i],compositions[i],e_above_hull])
+            except Exception as e:
+                print('calculated score error:', e)
+                pass
+        if len(entries) == 0:
+            return None,None
+        sorted_entries = sorted(entries,key = lambda x: x[2])
+        print([sorted_entry[1],sorted_entry[2]] for sorted_entry in sorted_entries)
+        if len(entries) == 0:
+            return None,None
+        try:
+            random_ind = np.random.randint(len(sorted_entries[0:5]))
+        except:
+            random_ind = np.random.randint(len(sorted_entries)+1//2)
+        #print('------------------------------------------------------------------------------------------------')
+        print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
+        return sorted_entries[0][0],sorted_entries[0][2]
+
+
+
+class SymmetryMutation:
+
+    def __init__(self,mating_params):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.potential = Potential.from_checkpoint(device=self.device)
+        self.name = "structure mutation"
+        self.fraction = mating_params['fraction']
+        self.wyckoff_dict = {letter: -i for i, letter in enumerate(string.ascii_lowercase, start=1)}
+        M_triclinic = np.array([
+            [1, 0, 0, 0],  # α free
+            [0, 1, 0, 0],  # β free
+            [0, 0, 1, 0],  # γ free
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_monoclinic = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 1, 0, 0],   # β free
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_orthorhombic = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 0, 0, 90],  # β = 90°
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_tetragonal = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 0, 0, 90],  # β = 90°
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_trigonal = np.array([
+            [0, 0, 0, 90],
+            [0, 0, 0, 90],
+            [0, 0, 0, 120],
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_hexagonal = M_trigonal.copy()
+        M_cubic = M_orthorhombic.copy()
+        crystal_systems = {
+            "triclinic": (1, 2, M_triclinic),
+            "monoclinic": (3, 15, M_monoclinic),
+            "orthorhombic": (16, 74, M_orthorhombic),
+            "tetragonal": (75, 142, M_tetragonal),
+            "trigonal": (143, 167, M_trigonal),
+            "hexagonal": (168, 194, M_hexagonal),
+            "cubic": (195, 230, M_cubic),
+        }
+        self.angles_matrix = {}
+        for name, (start, end, matrix) in crystal_systems.items():
+            for sg in range(start, end + 1):
+                self.angles_matrix[sg] = matrix
+        # Triclinic, monoclinic, orthorhombic: all free parameters
+        M_free = np.array([
+            [1, 0, 0, 0],  # a free
+            [0, 1, 0, 0],  # b free
+            [0, 0, 1, 0],  # c free
+            [0, 0, 0, 1]
+        ], dtype=float)
+
+        # Tetragonal & hexagonal & trigonal (hexagonal setting): a = b, c free
+        # Set a_out = a, b_out = a, c_out = c
+        M_a_equal_b = np.array([
+            [1, 0, 0, 0],  # a_out = a
+            [1, 0, 0, 0],  # b_out = a (force equality)
+            [0, 0, 1, 0],  # c_out = c
+            [0, 0, 0, 1]
+        ], dtype=float)
+
+        # Cubic: a = b = c
+        # Set a_out = a, b_out = a, c_out = a
+        M_a_equal_b_equal_c = np.array([
+            [1, 0, 0, 0],  # a_out = a
+            [1, 0, 0, 0],  # b_out = a
+            [1, 0, 0, 0],  # c_out = a
+            [0, 0, 0, 1]
+        ], dtype=float)
+        # Map space group ranges to matrices
+        crystal_systems_lattice = {
+            "triclinic": (1, 2, M_free),
+            "monoclinic": (3, 15, M_free),
+            "orthorhombic": (16, 74, M_free),
+            "tetragonal": (75, 142, M_a_equal_b),
+            "trigonal": (143, 167, M_a_equal_b),
+            "hexagonal": (168, 194, M_a_equal_b),
+            "cubic": (195, 230, M_a_equal_b_equal_c),
+        }
+
+        # Generate dictionary
+        self.cell = None
+        self.constants_matrix = {}
+        for name, (start, end, matrix) in crystal_systems_lattice.items():
+            for sg in range(start, end + 1):
+                self.constants_matrix[sg] = matrix
+
+
+    def furthest_point_pbc(self, points, grid_resolution=50):
+        """
+        Find the point in fractional crystal coordinates (0-1 in each axis)
+        that is furthest from all given points, considering periodic boundary conditions.
+
+        points: np.array of shape (N,3), values in [0,1]
+        grid_resolution: number of points per axis to sample
+        """
+        if len(points) == 0:
+            return np.array([0,0,0])
+        points = np.array(points)
+
+        # Generate candidate grid points within unit cell
+        x = np.linspace(0, 1, grid_resolution)
+        y = np.linspace(0, 1, grid_resolution)
+        z = np.linspace(0, 1, grid_resolution)
+        xv, yv, zv = np.meshgrid(x, y, z, indexing='ij')
+        candidates = np.stack([xv.ravel(), yv.ravel(), zv.ravel()], axis=1)
+
+        # Compute pairwise fractional differences with periodic boundary conditions
+        diff = candidates[:, np.newaxis, :] - points[np.newaxis, :, :]
+        diff -= np.round(diff)  # Wrap differences into [-0.5, 0.5] range
+
+        # Compute minimum image distances
+        dist_matrix = np.linalg.norm(diff, axis=2)
+
+        # Minimum distance from each candidate to any existing point
+        min_dists = dist_matrix.min(axis=1)
+
+        # Pick candidate with maximum minimum distance
+        idx = np.argmax(min_dists)
+        return candidates[idx]
+
+    def do_variation(self, pool, random, geometry, constraints, id_generator,
+                     composition_space):
+
+        parent1 = pool.select_organism(random, composition_space)
+        cell_1 = Structure.from_dict(parent1.cell.as_dict())
+        relative_wp1 = list(parent1.relative_wyckoffs)
+        sg1 = parent1.space_group
+        sg_offspring = np.random.randint(13,231)
+        relative_wp = relative_wp1
+        offspring_species = parent1.cell.species
+        prod = np.round(np.array(relative_wp)*len(Group(sg_offspring)))
+        offspring_wp = [Group(sg_offspring).Wyckoff_positions[-int(i)].letter for i in prod]
+        constants = np.insert(parent1.cell.lattice.abc,3,1)
+        lattice_constants = np.matmul(self.constants_matrix[sg_offspring],constants)
+        angles = np.insert(parent1.cell.lattice.angles,3,1)
+        lattice_angles = np.matmul(self.angles_matrix[sg_offspring],angles)
+        positions = []
+        indices = [self.wyckoff_dict[i.lower()] for i in offspring_wp]
+        for i,idx in enumerate(np.sort(indices)[::-1]):
+            try:
+                position = Group(sg_offspring).Wyckoff_positions[idx]
+            except:
+                position = Group(sg_offspring).Wyckoff_positions[0]
+            positions.append(position)
+
+        wp_dict = {np.sort(offspring_wp)[i]: 0 for i in range(len(offspring_wp))}
+        coords = []
+        for i,position in enumerate(positions):
+            has_free_param = np.any(np.array(position[0].as_dict()['matrix'])[:, :3] !=0)
+            wyckoff_letter = np.sort(offspring_wp)[i]
+            try:
+                if not has_free_param:
+                    M_coord = position[wp_dict[wyckoff_letter]].as_dict()['matrix']
+                    coord = np.ones(4)
+                    pred_coord = np.matmul(M_coord,coord)[:3]
+                    coords.append(pred_coord)
+                    wp_dict[wyckoff_letter] += 1
+                else:
+                    M_coord = position[wp_dict[wyckoff_letter]].as_dict()['matrix']
+                    furthest_coord = np.insert(self.furthest_point_pbc(coords,grid_resolution = 50),3,1)
+                    pred_coord = np.matmul(M_coord,furthest_coord)[:3]
+                    coords.append(pred_coord)
+                    wp_dict[wyckoff_letter] += 1
+
+            except Exception as e:
+                M_coord = Group(sg_offspring).Wyckoff_positions[0][0].as_dict()['matrix']
+                furthest_coord = np.insert(self.furthest_point_pbc(coords,grid_resolution = 50),3,1)
+                pred_coord = np.matmul(M_coord,furthest_coord)[:3]
+                coords.append(pred_coord)
+
+        coords = np.array(coords)%1
+        cell = self.create_cell(offspring_species, coords, np.array([lattice_constants[:3],lattice_angles[:3]]).reshape(6,))
+        org = SymOrganism(cell,id_generator, self.name, composition_space, sg_offspring, offspring_wp, relative_wp)
+        return org
+
+    def create_cell(self, species_list, coords, lattice_params):
+        frac_coords = np.array(coords, dtype=float)
+        lattice_params = np.array(lattice_params, dtype=float)
+        if lattice_params.shape == (3, 3):
+            lattice = Lattice(lattice_params)
+        elif lattice_params.size == 6:
+            a, b, c, alpha, beta, gamma = lattice_params
+            lattice = Lattice.from_parameters(a, b, c, alpha, beta, gamma)
+        else:
+            raise ValueError("lattice_info must be 3x3 matrix or [a,b,c,alpha,beta,gamma]")
+        structure = Structure(lattice, species_list, frac_coords)
+        return structure
+
+
+
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
+
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
+
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat
+
+
+
+
+    def looped(self, pool, random, geometry, constraints, id_generator,
+            composition_space, n):
+        candidates = [self.do_variation(pool, random, geometry, constraints, id_generator, composition_space) for i in range(n)]
+        self.candidates = candidates
+        return candidates
+
+    def calculate_scores(self, batch, compositions, predictions, pd, composition_space):
+        entries = []
+
+        for i in range(len(compositions)):
+            try:
+                entry = ComputedEntry(compositions[i],predictions[i])
+                transformed_entry = pd.transform_entries([entry],composition_space.endpoints)[0][0]
+                e_above_hull = pd.get_e_above_hull(transformed_entry)
+                entries.append([batch[i],compositions[i],e_above_hull])
+            except Exception as e:
+                print('calculated score error:', e)
+                pass
+        if len(entries) == 0:
+            return None,None
+        sorted_entries = sorted(entries,key = lambda x: x[2])
+        print([sorted_entry[1],sorted_entry[2]] for sorted_entry in sorted_entries)
+        if len(entries) == 0:
+            return None,None
+        try:
+            random_ind = np.random.randint(len(sorted_entries[0:5]))
+        except:
+            random_ind = np.random.randint(len(sorted_entries)+1//2)
+        #print('------------------------------------------------------------------------------------------------')
+        print(f'        ---> optimal offspring with composition {sorted_entries[0][0].cell.composition} and score {sorted_entries[0][2]}')
+        return sorted_entries[0][0],sorted_entries[0][2]
+
+
 class Mating:
     """
     An operator that creates an offspring organism by combining the structures
@@ -47,7 +903,6 @@ class Mating:
     """
 
     def __init__(self, mating_params):
-            
         """
         Makes a Mating operator, and sets default parameter values if
         necessary.
@@ -229,10 +1084,11 @@ class Mating:
         parent1 = pool.select_organism(random, composition_space)
         parent2 = pool.select_organism(random, composition_space,
                                        excluded_org=parent1)
-        #cell_1 = copy.deepcopy(parent1.cell)
-        #cell_2 = copy.deepcopy(parent2.cell)
+        
         cell_1 = Structure.from_dict(parent1.cell.as_dict())
         cell_2 = Structure.from_dict(parent2.cell.as_dict())
+        #cell_1 = copy.deepcopy(parent1.cell)
+        #cell_2 = copy.deepcopy(parent2.cell)
         # For interface goemetry, get the primitive cells of either one or
         # both the parent cells. This is to allow large area low energy
         # structures to mate within constraints of lattice lenghts. Else,
@@ -265,7 +1121,7 @@ class Mating:
         offspring = Organism(offspring_cell, id_generator, self.name,
                              composition_space)
         #print('variations.py line 254:', offspring)
-        offspring.parents = (parent1.id, parent2.id)
+        #offspring.parents = (parent1.id, parent2.id)
         #print('Creating offspring organism {} from parent organisms {} and {} '
               #'with the mating variation '.format(offspring.id, parent1.id,
                                                   #parent2.id))
@@ -322,6 +1178,7 @@ class Mating:
 
         Args:
             parent_cell_1: the Cell of the first parent
+
 
             parent_cell_2: the Cell of the second parent
 
@@ -707,19 +1564,55 @@ class Mating:
             return offspring_cell
         else:
             return halved_offspring_cell
-    
 
-    def predict_batches(self,batch):
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
 
-        ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch] 
-        dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = self.potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
-        self.predictions = predictions
-        compositions = [org.cell.composition for org in batch]
-        self.compositions = compositions
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
 
-        return total_energy, compositions
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat
+
+
+
 
     def looped(self, pool, random, geometry, constraints, id_generator, 
             composition_space, n):
@@ -890,8 +1783,9 @@ class StructureMut(object):
 
         # select a parent organism from the pool and get its cell
         parent_org = pool.select_organism(random, composition_space)
-        #cell = copy.deepcopy(parent_org.cell)
         cell = Structure.from_dict(parent_org.cell.as_dict())
+        #cell = copy.deepcopy(parent_org.cell)
+
         # perturb the site coordinates
         self.perturb_atomic_coords(cell, geometry, constraints, random)
 
@@ -999,17 +1893,51 @@ class StructureMut(object):
         new_lattice = Lattice([new_a, new_b, new_c])
         cell.lattice = new_lattice
 
-    def predict_batches(self,batch):
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
 
-        ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = self.potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
-        self.predictions = predictions
-        compositions = [org.cell.composition for org in batch]
-        self.compositions = compositions
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
 
-        return total_energy, compositions
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat
 
     def looped(self, pool, random, geometry, constraints, id_generator,       
             composition_space, n):
@@ -1148,6 +2076,7 @@ class NumAtomsMut(object):
 
         # select a parent organism from the pool and get its cell
         parent_org = pool.select_organism(random, composition_space)
+        
         #cell = copy.deepcopy(parent_org.cell)
         cell = Structure.from_dict(parent_org.cell.as_dict())
         parent_vol_per_atom = copy.deepcopy(cell.lattice.volume/cell.num_sites)
@@ -1333,17 +2262,51 @@ class NumAtomsMut(object):
         cell.remove_sites(site_indices_to_remove)
 
 
-    def predict_batches(self,batch):
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
 
-        ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        dataloader = build_dataloader(ase_batch, only_inference = True) 
-        predictions = self.potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
-        self.predictions = predictions
-        compositions = [org.cell.composition for org in batch]
-        self.compositions = compositions
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
 
-        return total_energy, compositions
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat
 
     def looped(self, pool, random, geometry, constraints, id_generator,
             composition_space, n):
@@ -1634,17 +2597,51 @@ class Permutation(object):
             cell.replace(index_pair[1], species_1)
 
 
-    def predict_batches(self,batch):
+    def predict_batches(self, batch, batch_size=32):
+        """
+        Predict properties in mini-batches.
 
-        ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in batch]
-        dataloader = build_dataloader(ase_batch, only_inference = True)
-        predictions = self.potential.predict_properties(dataloader)
-        total_energy = [predictions[0][i] for i in range(len(ase_batch))] 
-        self.predictions = predictions
-        compositions = [org.cell.composition for org in batch]
-        self.compositions = compositions
+        Parameters
+        ----------
+        batch : list
+        List of objects with .cell attribute.
+        batch_size : int
+        Size of each mini-batch.
+        """
 
-        return total_energy, compositions
+        total_energy_list = []
+        compositions_list = []
+
+        # Split batch into mini-batches
+        for i in range(0, len(batch), batch_size):
+            mini_batch = batch[i:i+batch_size]
+
+            # Convert to ASE atoms
+            ase_batch = [AseAtomsAdaptor.get_atoms(org.cell) for org in mini_batch]
+
+            # Build dataloader for inference
+            dataloader = build_dataloader(ase_batch, only_inference=True)
+
+            # Predict properties
+            predictions = self.potential.predict_properties(dataloader)
+
+            # Collect energies and compositions
+            total_energy = [predictions[0][j] for j in range(len(ase_batch))]
+            compositions = [org.cell.composition for org in mini_batch]
+
+            # Append to lists
+            total_energy_list.append(total_energy)
+            compositions_list.append(compositions)
+
+        # Flatten lists
+        total_energy_flat = [item for sublist in total_energy_list for item in sublist]
+        compositions_flat = [item for sublist in compositions_list for item in sublist]
+
+        # Save predictions and compositions
+        self.predictions = predictions  # keeps last mini-batch predictions
+        self.compositions = compositions_flat
+
+        return total_energy_flat, compositions_flat
 
     def looped(self, pool, random, geometry, constraints, id_generator,       
             composition_space, n):
