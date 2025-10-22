@@ -1,4 +1,4 @@
-from .general import Organism,Cell
+from .general import SymOrganism,Organism,Cell
 from . import objects_maker
 from . import parameters_printer
 from . import geometry
