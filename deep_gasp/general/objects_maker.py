@@ -182,27 +182,41 @@ def make_objects(parameters):
             do_atomsmut = True
 
     # set default fractions for the variations
-    default_variation_fractions = {}
-    if do_permutation and do_atomsmut:
-        default_variation_fractions['permutation'] = 0.1
-        default_variation_fractions['num_atoms_mut'] = 0.1
-        default_variation_fractions['structure_mut'] = 0.1
+    if parameters['symmetry_search']:
+        default_variation_fractions = {}
         default_variation_fractions['mating'] = 0.7
-    elif not do_permutation and do_atomsmut:
-        default_variation_fractions['permutation'] = 0.0
-        default_variation_fractions['num_atoms_mut'] = 0.1
-        default_variation_fractions['structure_mut'] = 0.1
-        default_variation_fractions['mating'] = 0.8
-    elif do_permutation and not do_atomsmut:
-        default_variation_fractions['permutation'] = 0.1
-        default_variation_fractions['num_atoms_mut'] = 0.0
-        default_variation_fractions['structure_mut'] = 0.1
-        default_variation_fractions['mating'] = 0.8
-    elif not do_permutation and not do_atomsmut:
-        default_variation_fractions['permutation'] = 0.0
-        default_variation_fractions['num_atoms_mut'] = 0.0
-        default_variation_fractions['structure_mut'] = 0.2
-        default_variation_fractions['mating'] = 0.8
+        default_variation_fractions['structure_mut'] = 0.3
+        assert abs(default_variation_fractions['mating'] + default_variation_fractions['structure_mut'] - 1) < 0.001, 'make sure variation probabilities mating and mutation sum up to 1'
+    else:
+        default_variation_fractions = {}
+        if do_permutation and do_atomsmut:
+            #print('---------> going into if 1')
+            default_variation_fractions['permutation'] = 0.1
+            default_variation_fractions['num_atoms_mut'] = 0.1
+            default_variation_fractions['structure_mut'] = 0.1
+            default_variation_fractions['mating'] = 0.7
+            default_variation_fractions['embedding'] = 0.0
+        elif not do_permutation and do_atomsmut:
+            #print('---------> going into if 2')
+            default_variation_fractions['permutation'] = 0.0
+            default_variation_fractions['num_atoms_mut'] = 0.1
+            default_variation_fractions['structure_mut'] = 0.1
+            default_variation_fractions['mating'] = 0.4
+            default_variation_fractions['embedding'] = 0.4
+        elif do_permutation and not do_atomsmut:
+            #print('---------> going into if 3')
+            default_variation_fractions['permutation'] = 0.1
+            default_variation_fractions['num_atoms_mut'] = 0.0
+            default_variation_fractions['structure_mut'] = 0.1
+            default_variation_fractions['mating'] = 0.4
+            default_variation_fractions['embedding'] = 0.4
+        elif not do_permutation and not do_atomsmut:
+            #print('---------> going into if 4')
+            default_variation_fractions['permutation'] = 0.0
+            default_variation_fractions['num_atoms_mut'] = 0.0
+            default_variation_fractions['structure_mut'] = 0.2
+            default_variation_fractions['mating'] = 0.4
+            default_variation_fractions['embedding'] = 0.4
 
     # make the variations
     variations_list = make_variations(parameters, default_variation_fractions,
@@ -219,6 +233,7 @@ def make_objects(parameters):
     # check that the variations' fraction variables sum to 1
     frac_sum = 0.0
     for variation in variations_list:
+        #print(f'{variation.name} fraction:',variation.fraction)
         frac_sum = frac_sum + variation.fraction
     if frac_sum < 0.999 or frac_sum > 1.001:
         print("The Variations' fraction values must sum to 1.")
@@ -382,7 +397,7 @@ def make_organism_creators(parameters, composition_space, constraints):
         # check that at least one valid option is used
         # TODO: if other organism creators are used, check them here as well
         if 'random' not in parameters['InitialPopulation'] and 'from_files' \
-                not in parameters['InitialPopulation'] and 'generative' not in parameters['InitialPopulation']:
+                not in parameters['InitialPopulation'] and 'generative' not in parameters['InitialPopulation'] and 'symmetry' not in parameters['InitialPopulation']:
             print('At least one valid option for making structures for the '
                   'initial population must be provided.')
             print('Please use the "random","generative", and/or  "from_files" keywords in '
@@ -391,6 +406,11 @@ def make_organism_creators(parameters, composition_space, constraints):
             quit()
 
         initial_organism_creators = []
+        
+        #if 'symmetry' in parameters['InitialPopulation']:
+        #    symmetry_organism_creator = organism_creators.SymmetryOrganismCreator(composition_space,
+        #            constraints)
+       #     initial_organism_creators.append(symmetry_organism_creator)
 
         # the random organism creator
         if 'random' in parameters['InitialPopulation']:
@@ -420,6 +440,10 @@ def make_organism_creators(parameters, composition_space, constraints):
                 print('need to either provide a path to folder to create organisms from files, or have the keyword "path_to_folder" in the gasp input file...')
                 print('Quitting....')
                 quit()
+        if 'symmetry' in parameters['InitialPopulation']:
+            symmetry_organism_creator = organism_creators.SymmetryOrganismCreator(composition_space,
+                    constraints)
+            initial_organism_creators.append(symmetry_organism_creator)
 
         # TODO: if other organism creators are used, they should be
         # instantiated here
@@ -829,7 +853,7 @@ def make_variations(parameters, default_fractions, composition_space):
     """
 
     if 'Variations' not in parameters:
-        return make_default_variations(default_fractions, composition_space)
+        return make_default_variations(parameters, default_fractions, composition_space)
     elif parameters['Variations'] in (None, 'default'):
         return make_default_variations(default_fractions, composition_space)
     else:
@@ -919,7 +943,7 @@ def make_variations(parameters, default_fractions, composition_space):
         return variations_list
 
 
-def make_default_variations(default_fractions, composition_space):
+def make_default_variations(parameters,default_fractions, composition_space):
     """
     Creates the variations with default parameter values and the provided
     default fractions.
@@ -933,18 +957,29 @@ def make_default_variations(default_fractions, composition_space):
 
         composition_space: the CompositionSpace of the search
     """
-
-    variations_list = []
-    mating = variations.Mating({'fraction': default_fractions['mating']})
-    structure_mut = variations.StructureMut(
+    if parameters['symmetry_search']:
+        variations_list = []
+        mating = variations.SymmetryMating({'fraction': default_fractions['mating']})
+        mutation = variations.SymmetryMutation({'fraction': default_fractions['structure_mut']})
+        variations_list.append(mating)
+        variations_list.append(mutation)
+        #raise NotImplementedError
+    else:
+        variations_list = []
+        mating = variations.Mating({'fraction': default_fractions['mating']})
+        structure_mut = variations.StructureMut(
                 {'fraction': default_fractions['structure_mut']})
-    num_atoms_mut = variations.NumAtomsMut(
+        num_atoms_mut = variations.NumAtomsMut(
                 {'fraction': default_fractions['num_atoms_mut']})
-    permutation = variations.Permutation(
+        permutation = variations.Permutation(
                 {'fraction': default_fractions['permutation']},
                 composition_space)
-    variations_list.append(mating)
-    variations_list.append(structure_mut)
-    variations_list.append(num_atoms_mut)
-    variations_list.append(permutation)
+    
+        default_checkpoint_path = '/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/deep_gasp/vae_mating/checkpoints/default_checkpoint/default_ckpt.pt'
+        embedding = variations.VAE_mating(default_checkpoint_path, {'fraction': default_fractions['embedding']})
+        variations_list.append(mating)
+        variations_list.append(structure_mut)
+        variations_list.append(num_atoms_mut)
+        variations_list.append(permutation)
+        variations_list.append(embedding)
     return variations_list
