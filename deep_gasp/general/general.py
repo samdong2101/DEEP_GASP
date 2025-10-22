@@ -33,7 +33,7 @@ This module contains several classes central to the algorithm.
 9. DataWriter: writes information about the search to a file
 
 """
-
+from datetime import datetime
 from pymatgen.core.structure import Structure, Molecule
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.composition import Composition
@@ -66,8 +66,120 @@ class IDGenerator(object):
         self.id += 1
         return self.id
 
+class SymOrganism:
+    def __init__(self, cell, id_generator, maker, composition_space, sg, wp, relative_wp):
+        cell = cell.remove_oxidation_states()
+        self.cell = cell
+        self.composition = self.cell.composition
+        self.composition_vector = self.compute_composition_vector(composition_space)
+        self.total_energy = None
+        self.value = None
+        self.epa = None
+        self.fitness = None
+        self.relative_fitness = None
+        self.selection_prob = None
+        self.selection_loc = None
+        self.relative_selection_prob = None
+        self.relative_selection_loc = None
+        self.is_active = False
+        self._id = id_generator.make_id()
+        self.made_by = maker
+        self.parents = None
+        self.sd_index = None
+        self.n_sub = None
+        self.wyckoffs = wp
+        self.relative_wyckoffs = relative_wp
+        self.space_group = sg
+    # This keeps the id (sort of) immutable by causing an exception to be
+    # raised if the id is attempted to be set with org.id = some_id.
+    @property
+    def id(self):
+        return self._id
 
-class Organism(object):
+    def compute_composition_vector(self, composition_space):
+        """
+        Returns the composition vector of the organism, as a numpy array.
+
+        Args:
+            composition_space: the CompositionSpace of the search.
+        """
+
+        if composition_space.objective_function == 'epa':
+            return None
+        elif composition_space.objective_function == 'pd':
+            # make CompoundPhaseDiagram and PDAnalyzer objects
+            pdentries = []
+            for endpoint in composition_space.endpoints:
+                pdentries.append(PDEntry(endpoint, -10))
+            compound_pd = CompoundPhaseDiagram(pdentries,
+                                               composition_space.endpoints)
+
+            transformed_entry = compound_pd.transform_entries(
+                [PDEntry(self.composition, 10)], composition_space.endpoints)
+
+            # get the transformed species and amounts
+            if len(transformed_entry[0]) == 0:
+                return None
+            transformed_list = str(transformed_entry[0][0]).split()
+            del transformed_list[0]
+            popped = ''
+            while popped != 'with':
+                popped = transformed_list.pop()
+
+            # separate the dummy species symbols from the amounts
+            symbols = []
+            amounts = []
+            for entry in transformed_list:
+                split_entry = entry.split('0+')
+                symbols.append(split_entry[0])
+                amounts.append(float(split_entry[1]))
+
+            # make a dictionary mapping dummy species to amounts
+            dummy_species_amounts = {}
+            for i in range(len(symbols)):
+                dummy_species_amounts[DummySpecie(symbol=symbols[i])] = \
+                    amounts[i]
+
+            # make Composition object with dummy species, get decomposition
+            dummy_comp = Composition(dummy_species_amounts)
+            decomp = compound_pd.get_decomposition(dummy_comp)
+
+            # get amounts of the decomposition in terms of the (untransformed)
+            # composition space endpoints
+            formatted_decomp = {}
+            for key in decomp:
+                key_dict = key.as_dict()
+                #print(key_dict)
+                #comp = Composition(key_dict['entry']['composition'])
+                comp = Composition(key_dict['composition'])
+                formatted_decomp[comp] = decomp[key]
+
+            # make the composition vector
+            composition_vector = []
+            # because the random organism creator shuffles the endpoints
+            composition_space.endpoints.sort()
+            for endpoint in composition_space.endpoints:
+                if endpoint in formatted_decomp:
+                    composition_vector.append(formatted_decomp[endpoint])
+                else:
+                    composition_vector.append(0.0)
+            return np.array(composition_vector)
+
+    def is_at_endpoint(self, composition_space):
+        """
+        Returns a boolean indicating whether the organism is located at an
+        endpoint of the composition space.
+
+        Args:
+            composition_space: the CompositionSpace of the search
+        """
+
+        for endpoint in composition_space.endpoints:
+            if self.composition.reduced_composition.almost_equals(endpoint):
+                return True
+        return False
+
+class Organism:
     """
     An organism, consisting primarily of a cell and an energy, as well as
     several derived quantities.
@@ -125,14 +237,9 @@ class Organism(object):
         self.sd_index=None
         # Save interface cell or just 2D cell
         self.interface_cell=None
-
-
-    # This keeps the id (sort of) immutable by causing an exception to be
-    # raised if the id is attempted to be set with org.id = some_id.
-    @property
-    def id(self):
-        return self._id
-
+        
+        #self.wyckoff_positions = wyckoffs
+        #self.space_group = space_group
     def compute_composition_vector(self, composition_space):
         """
         Returns the composition vector of the organism, as a numpy array.
@@ -216,6 +323,12 @@ class Organism(object):
             if self.composition.reduced_composition.almost_equals(endpoint):
                 return True
         return False
+
+    # This keeps the id (sort of) immutable by causing an exception to be
+    # raised if the id is attempted to be set with org.id = some_id.
+    @property
+    def id(self):
+        return self._id
 
 
 class Cell(Structure):
@@ -475,7 +588,7 @@ class OffspringGenerator:
     def make_offspring_organism(self, random, pool, variations, geometry,
                                 id_generator, whole_pop, developer,
                                 redundancy_guard, composition_space,
-                                constraints, num_mating, num_mutation):
+                                constraints, num_mating, num_mutation, num_embedding):
         """
         Returns a developed, non-redundant, unrelaxed offspring organism
         generated with one of the variations.
@@ -526,7 +639,6 @@ class OffspringGenerator:
         max_num_tries = 10000
 
         while True:
-            #print('general.py line 522')
             variation = self.select_variation(random, tried_variations,
                                               variations)
            
@@ -541,8 +653,10 @@ class OffspringGenerator:
                 n = num_mutation
             if variation.name == 'number of atoms mutation':
                 n = num_mutation
+            if variation.name == 'embedding':
+                n = num_embedding
             print('-----------------------------------------------------------------------------------------')
-            print(f'Performing {variation.name} pool size of N = {n}...')
+            print(f"Performing {variation.name} pool size of N = {n} at time {str(datetime.now()).replace(' ', '_')}")
             print('-----------------------------------------------------------------------------------------')
             while num_tries < max_num_tries and len(candidates) < n:
                 #candidates = variation.looped(
@@ -554,27 +668,27 @@ class OffspringGenerator:
                 #epas,compositions = variation.predict_batches(candidates)
                 #offspring,score = variation.calculate_scores(candidates, compositions, epas, self.pd, self.composition_space)
                 
-                if developer.develop(
-                        offspring, composition_space, constraints, geometry,
-                        pool) and (redundancy_guard.check_redundancy(
-                            offspring, whole_pop, geometry) is None):
+                #if developer.develop(
+                #        offspring, composition_space, constraints, geometry,
+                #        pool) and (redundancy_guard.check_redundancy(
+                #            offspring, whole_pop, geometry) is None):
                                     
-                    candidates.append(offspring)
+                candidates.append(offspring)
                     #print('candidate sizes:',len(o.cell)
-                else:
-                    num_tries = num_tries + 1
+                #else:
+                #    pass
+                    #num_tries = num_tries + 1
             #print('candidate sizes:',[len(o.cell) for o in candidates])
             candidate_groups = defaultdict(list)
             for group in candidates:
                 candidate_groups[len(group.cell)].append(group)
-
             grouped_candidates = [candidate_groups[key] for key in sorted(candidate_groups)]
             candidate_pool = []
+            
             for candidates in grouped_candidates:
                 energies,compositions = variation.predict_batches(candidates)
                 offspring,score = variation.calculate_scores(candidates, compositions, energies, self.pd, self.composition_space)
                 candidate_pool.append([offspring,score])
-            
             
             candidate_pool = [org for org in candidate_pool if org[0] != None]
             if len(candidate_pool) == 0:
