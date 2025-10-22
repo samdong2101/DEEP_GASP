@@ -200,12 +200,14 @@ class VaspEnergyCalculator(object):
         for i in range(self.num_submits_to_converge):
             devnull = open(os.devnull, 'w')
             try:
-                subprocess.call(['callvasp', job_dir_path], stdout=devnull,
+                subprocess.call(['/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/call_scripts/callvasp', job_dir_path], stdout=devnull,
                                 stderr=devnull)
-            except:
-                print('Error running VASP on organism {} '.format(organism.id))
-                return None
 
+
+            except Exception as e:
+                print(f'Error running VASP on organism {organism.id}:{e}')
+                return None
+            
             # check if the VASP calculation converged
             converged = False
             with open(job_dir_path + '/OUTCAR') as f:
@@ -220,7 +222,7 @@ class VaspEnergyCalculator(object):
                     self.rearrange_files(i+1, job_dir_path)
 
         # check if need to re-relax the converged structure
-        if self.num_rerelax > 0:
+        if self.num_rerelax > 0:    
             for i in range(self.num_rerelax):
                 # start indexing the calculation after
                 # self.num_submits_to_converge
@@ -229,11 +231,10 @@ class VaspEnergyCalculator(object):
                     self.rearrange_files(ind, job_dir_path)
                 devnull = open(os.devnull, 'w')
                 try:
-                    subprocess.call(['callvasp', job_dir_path], stdout=devnull,
+                    subprocess.call(['/blue/hennig/sam.dong/deep_gasp_github/DEEP_GASP_GPU/call_scripts/callvasp', job_dir_path], stdout=devnull,
                                     stderr=devnull)
-                except:
-                    print('Error running VASP on organism {} '.format(
-                                                        organism.id))
+                except Exception as e:
+                    print(f'Error running VASP on organism {organism.id}:{e}')
                     return None
 
         # check if converged again (useful when
@@ -1216,10 +1217,11 @@ class MatterSimEnergyCalculator:
         self.potential = Potential.from_checkpoint(load_path="MatterSim-v1.0.0-5M.pth",device=self.device)
         self.calculator = MatterSimCalculator(load_path="MatterSim-v1.0.0-5M.pth", device=self.device)
         self.relaxer_fire = Relaxer(optimizer="FIRE",
-                                    filter="ExpCellFilter")
+                                    filter="ExpCellFilter",
+                                    constrain_symmetry = True)
         self.relaxer_bfgs = Relaxer(optimizer="BFGS", 
                                 filter="ExpCellFilter",
-                                constrain_symmetry = False)
+                                constrain_symmetry = True)
     def do_energy_calculation(self, organism,
                               composition_space, E_sub_prim=None,
                               n_sub_prim=None, mu_A=0, mu_B=0, mu_C=0,
@@ -1261,8 +1263,16 @@ class MatterSimEnergyCalculator:
                          str(organism.id) + '_unrelaxed')
 
         ase_struct = AseAtomsAdaptor.get_atoms(organism.cell)
-
+        #signal.signal(signal.SIGALRM, self.timeout_handler)
+        #print(f'    ---> setting alarm for 60 seconds')
+        #signal.alarm(60)
+        #with torch.no_grad():
         try:
+            #dataloader = build_dataloader([ase_struct], only_inference = True)
+            #predictions = self.potential.predict_properties(dataloader,include_forces = True, 
+            #                                            include_stresses = True)
+            #organism.total_energy = predictions[0][0]
+            #organism.epa = predictions[0][0]/len(organism.cell)
             ase_struct.calc = self.calculator
             init_relax = self.relaxer_fire.relax(ase_struct,
                                                 steps=500,
@@ -1274,7 +1284,8 @@ class MatterSimEnergyCalculator:
             organism.total_energy = predictions[0][0]
             organism.epa = predictions[0][0]/len(organism.cell)
             relaxed_structure = AseAtomsAdaptor.get_structure(relaxed_ase[1])
-            organism.cell = relaxed_structure
+            relaxed_structure = Structure.from_dict(relaxed_structure.as_dict())
+            organism.cell = relaxed_structure 
             organism.cell.to(fmt='poscar', filename=job_dir_path + '/POSCAR.' + str(organism.id) + '_relaxed')
             torch.cuda.empty_cache()
         except Exception as e:
