@@ -1,5 +1,5 @@
 from __future__ import division, unicode_literals, print_function
-from deep_gasp.general import Organism, Cell
+from deep_gasp.general import SymOrganism, Organism, Cell
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.composition import Composition
 from fractions import Fraction
@@ -20,6 +20,40 @@ import pickle
 from deep_gasp.WGANsg_torch.WGAN_sg import WGAN_sg_model
 import shutil
 import torch
+# Core Python
+import os
+import io
+import csv
+import ast
+import random
+import fnmatch
+import pickle
+
+# Numerical and Data Handling
+import numpy as np
+import pandas as pd
+
+# Plotting
+import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt  # Redundant — remove one (see note below)
+
+# ASE (Atomic Simulation Environment)
+from ase import Atoms
+from ase.io import read, write
+from ase.build import molecule
+
+# Pymatgen
+from pymatgen.core import Lattice, Structure, Molecule, Element
+from pymatgen.transformations.standard_transformations import RotationTransformation
+
+# Machine Learning
+from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+import torch
+from pyxtal.symmetry import Group, index_from_letter
+from collections import defaultdict
+import string
+
 #from __future__ import division, unicode_literals, print_function
 print('organism creator inputs done')
 
@@ -212,7 +246,7 @@ class RandomOrganismCreator:
         return default_vpas
 
     def create_organism(self, id_generator, composition_space, constraints,
-                        random):
+                        random, symmetry_search = False):
         """
         Creates a random organism for the initial population.
 
@@ -642,7 +676,7 @@ class FileOrganismCreator:
         self.path = None
 
     def create_organism(self, id_generator, composition_space, constraints,
-                        random):
+                        random, symmetry_search = False):
         """
         Creates an organism for the initial population from a poscar or cif
         file.
@@ -671,19 +705,27 @@ class FileOrganismCreator:
         if self.files[self.num_made - 1].endswith('.cif') or self.files[
                 self.num_made - 1].startswith('POSCAR'):
             try:
-
-                new_cell = Cell.from_file(
+                if symmetry_search:
+                    wyckoff_dict = {letter: i for i, letter in enumerate(string.ascii_lowercase, start=1)}
+                    new_cell = Cell.from_file(str(self.path_to_folder) + '/' + str(
+                        self.files[self.num_made - 1]))
+                    sg,wp = new_cell.get_symmetry_dataset()['number'], new_cell.get_symmetry_dataset()['wyckoffs']
+                    divisor = len(Group(sg))
+                    relative_wyckoffs = [wyckoff_dict[letter]/divisor for letter in wp] 
+                    new_org = SymOrganism(new_cell, id_generator, self.name, composition_space, sg, wp, relative_wyckoffs)
+                    self.update_status()
+                    return new_org
+                else:
+                    new_cell = Cell.from_file(
                     str(self.path_to_folder) + '/' + str(
                         self.files[self.num_made - 1]))
-            #print('made cell')
-
-                new_org = Organism(new_cell, id_generator, self.name,
+                    new_org = Organism(new_cell, id_generator, self.name,
                                composition_space)
-                print('------------------------------------------------------------------------------------------------')
-                print('Making organism {} from file: {} '.format(
-                    new_org.id, self.files[self.num_made - 1]))
-                self.update_status()
-                return new_org
+                    print('------------------------------------------------------------------------------------------------')
+                    print('Making organism {} from file: {} '.format(
+                        new_org.id, self.files[self.num_made - 1]))
+                    self.update_status()
+                    return new_org
             except Exception as e:
                 print(e)
                 print('Error reading structure from file: {} '.format(
@@ -740,6 +782,248 @@ class FileOrganismCreator:
             self.is_finished = True
 
 
+class SymmetryOrganismCreator:
+    def __init__(self,composition_space, constraints):
+        self.name = 'symmetry_organism_creator'        
+        print('================================================================================================')
+        print(f'Creating organisms with {self.name}...')
+        print('================================================================================================')
+        M_triclinic = np.array([
+            [1, 0, 0, 0],  # α free
+            [0, 1, 0, 0],  # β free
+            [0, 0, 1, 0],  # γ free
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_monoclinic = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 1, 0, 0],   # β free
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_orthorhombic = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 0, 0, 90],  # β = 90°
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_tetragonal = np.array([
+            [0, 0, 0, 90],  # α = 90°
+            [0, 0, 0, 90],  # β = 90°
+            [0, 0, 0, 90],  # γ = 90°
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_trigonal = np.array([
+            [0, 0, 0, 90],
+            [0, 0, 0, 90],
+            [0, 0, 0, 120],
+            [0, 0, 0, 1]
+        ], dtype=float)
+        M_hexagonal = M_trigonal.copy()
+        M_cubic = M_orthorhombic.copy()
+        crystal_systems = {
+            "triclinic": (1, 2, M_triclinic),
+            "monoclinic": (3, 15, M_monoclinic),
+            "orthorhombic": (16, 74, M_orthorhombic),
+            "tetragonal": (75, 142, M_tetragonal),
+            "trigonal": (143, 167, M_trigonal),
+            "hexagonal": (168, 194, M_hexagonal),
+            "cubic": (195, 230, M_cubic),
+        }
+        self.angles_matrix = {}
+        for name, (start, end, matrix) in crystal_systems.items():
+            for sg in range(start, end + 1):
+                self.angles_matrix[sg] = matrix
+        # Triclinic, monoclinic, orthorhombic: all free parameters
+        M_free = np.array([
+            [1, 0, 0, 0],  # a free
+            [0, 1, 0, 0],  # b free
+            [0, 0, 1, 0],  # c free
+            [0, 0, 0, 1]
+        ], dtype=float)
+        
+        # Tetragonal & hexagonal & trigonal (hexagonal setting): a = b, c free
+        # Set a_out = a, b_out = a, c_out = c
+        M_a_equal_b = np.array([
+            [1, 0, 0, 0],  # a_out = a
+            [1, 0, 0, 0],  # b_out = a (force equality)
+            [0, 0, 1, 0],  # c_out = c
+            [0, 0, 0, 1]
+        ], dtype=float)
+        
+        # Cubic: a = b = c
+        # Set a_out = a, b_out = a, c_out = a
+        M_a_equal_b_equal_c = np.array([
+            [1, 0, 0, 0],  # a_out = a
+            [1, 0, 0, 0],  # b_out = a
+            [1, 0, 0, 0],  # c_out = a
+            [0, 0, 0, 1]
+        ], dtype=float)
+        # Map space group ranges to matrices
+        crystal_systems_lattice = {
+            "triclinic": (1, 2, M_free),
+            "monoclinic": (3, 15, M_free),
+            "orthorhombic": (16, 74, M_free),
+            "tetragonal": (75, 142, M_a_equal_b),
+            "trigonal": (143, 167, M_a_equal_b),
+            "hexagonal": (168, 194, M_a_equal_b),
+            "cubic": (195, 230, M_a_equal_b_equal_c),
+        }
+        
+        # Generate dictionary
+        self.cell = None
+        self.constants_matrix = {}
+        for name, (start, end, matrix) in crystal_systems_lattice.items():
+            for sg in range(start, end + 1):
+                self.constants_matrix[sg] = matrix
+        self.wyckoff_dict = {letter: -i for i, letter in enumerate(string.ascii_lowercase, start=1)}
+        current_path = os.getcwd()
+        with open(os.path.join(current_path,'distributions/relative_wyckoff_distribution.pkl'), 'rb') as f:
+            self.relative_wyckoff_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/space_group_distribution.pkl'), 'rb') as f:
+            self.space_group_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/a_distribution.pkl'), 'rb') as f:
+            self.a_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/b_distribution.pkl'), 'rb') as f:
+            self.b_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/c_distribution.pkl'), 'rb') as f:
+            self.c_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/alpha_distribution.pkl'), 'rb') as f:
+            self.alpha_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/beta_distribution.pkl'), 'rb') as f:
+            self.beta_distribution = pickle.load(f)
+        with open(os.path.join(current_path,'distributions/gamma_distribution.pkl'), 'rb') as f:
+            self.gamma_distribution = pickle.load(f)
+        self.constraints = constraints
+        self.composition_space = composition_space
+        self.num_made = 0  # number added to initial population
+        self.is_successes_based = True  # it's based on number added
+        self.is_finished = False
+        self.wp = None
+        self.sg = None
+        self.relative_wp = None
+    def set_seed(self):
+        size = np.random.randint(self.constraints.min_num_atoms, self.constraints.max_num_atoms)
+        self.sg = np.random.choice(self.space_group_distribution,size = 1)[0]
+        print(f'searching through space group {self.sg}',flush = True)
+        self.relative_wp = np.random.choice(self.relative_wyckoff_distribution, size = size)
+        prod = np.round(self.relative_wp*len(Group(int(self.sg))))
+        self.wp = [Group(int(self.sg)).Wyckoff_positions[-int(i)].letter.lower() for i in prod]
+        a = np.random.choice(self.a_distribution,size = 1)[0]
+        b = np.random.choice(self.b_distribution,size = 1)[0]
+        c = np.random.choice(self.c_distribution,size = 1)[0]
+        alpha = np.random.choice(self.alpha_distribution,size = 1)[0]
+        beta = np.random.choice(self.beta_distribution,size = 1)[0]
+        gamma = np.random.choice(self.gamma_distribution,size = 1)[0]
+        self.lattice_params = np.array([a,b,c,alpha,beta,gamma])
+        self.species_list = np.random.choice([str(i) for i in self.composition_space.endpoints],size = size)
+    def construct_cell_from_sg(self, species_list, sg, wp, lattice_params):
+        assert lattice_params.size == 6, "lattice parameters must be of size 6, with order constants, angles"
+        assert len(species_list) == len(wp), "species_list must be same length as wyckoff list"
+
+        indices = [self.wyckoff_dict[i] for i in wp]
+        positions = []
+        coords = []
+        lattice_params = lattice_params.reshape(6,)
+        constants_free_param = np.insert(lattice_params[:3],3,1)
+        lattice_constants = np.matmul(self.constants_matrix[sg],constants_free_param)
+        angles_free_param = np.insert(lattice_params[3:],3,1)
+        lattice_angles = np.matmul(self.angles_matrix[sg], angles_free_param)
+        wp_dict = {np.sort(wp)[i]: 0 for i in range(len(wp))}
+        for i,idx in enumerate(np.sort(indices)[::-1]):
+            try:
+                position = Group(sg).Wyckoff_positions[idx]
+            except:
+                position = Group(sg).Wyckoff_positions[0]
+            positions.append(position)
+        for i, position in enumerate(positions):
+            has_free_param = np.any(np.array(position[0].as_dict()['matrix'])[:, :3] != 0)
+            wyckoff_letter = np.sort(wp)[i]
+            try:
+                if not has_free_param:
+                    M_coord = position[wp_dict[wyckoff_letter]].as_dict()['matrix']
+                    coord = np.ones(4)
+                    pred_coord = np.matmul(M_coord,coord)[:3]
+                    coords.append(pred_coord)
+                    wp_dict[wyckoff_letter] += 1
+                else:
+
+                    M_coord = position[wp_dict[wyckoff_letter]].as_dict()['matrix']
+                    furthest_coord = np.insert(self.furthest_point_pbc(coords,grid_resolution = 50),3,1)
+                    pred_coord = np.matmul(M_coord,furthest_coord)[:3]
+                    coords.append(pred_coord)
+                    wp_dict[wyckoff_letter] += 1
+            except:
+
+                M_coord = Group(sg).Wyckoff_positions[0][0].as_dict()['matrix']
+                furthest_coord = np.insert(self.furthest_point_pbc(coords,grid_resolution = 50),3,1)
+                pred_coord = np.matmul(M_coord,furthest_coord)[:3]
+                coords.append(pred_coord)
+
+        coords = np.array(coords)%1
+        cell = self.create_cell(species_list, coords, np.array([lattice_constants[:3],lattice_angles[:3]]).reshape(6,))
+
+        return cell
+
+    def furthest_point_pbc(self, points, grid_resolution=50):
+        """
+        Find the point in fractional crystal coordinates (0-1 in each axis)
+        that is furthest from all given points, considering periodic boundary conditions.
+        
+        points: np.array of shape (N,3), values in [0,1]
+        grid_resolution: number of points per axis to sample
+        """
+        if len(points) == 0:
+            return np.array([0,0,0])
+        points = np.array(points)
+        
+        # Generate candidate grid points within unit cell
+        x = np.linspace(0, 1, grid_resolution)
+        y = np.linspace(0, 1, grid_resolution)
+        z = np.linspace(0, 1, grid_resolution)
+        xv, yv, zv = np.meshgrid(x, y, z, indexing='ij')
+        candidates = np.stack([xv.ravel(), yv.ravel(), zv.ravel()], axis=1)
+    
+        # Compute pairwise fractional differences with periodic boundary conditions
+        diff = candidates[:, np.newaxis, :] - points[np.newaxis, :, :]
+        diff -= np.round(diff)  # Wrap differences into [-0.5, 0.5] range
+    
+        # Compute minimum image distances
+        dist_matrix = np.linalg.norm(diff, axis=2)
+    
+        # Minimum distance from each candidate to any existing point
+        min_dists = dist_matrix.min(axis=1)
+    
+        # Pick candidate with maximum minimum distance
+        idx = np.argmax(min_dists)
+        return candidates[idx]
+
+    def create_cell(self, species_list, coords, lattice_params):
+        frac_coords = np.array(coords, dtype=float)
+        lattice_params = np.array(lattice_params, dtype=float)
+        print(lattice_params)
+        if lattice_params.shape == (3, 3):
+            lattice = Lattice(lattice_params)
+        elif lattice_params.size == 6:
+            a, b, c, alpha, beta, gamma = lattice_params
+            lattice = Lattice.from_parameters(a, b, c, alpha, beta, gamma)
+        else:
+            raise ValueError("lattice_info must be 3x3 matrix or [a,b,c,alpha,beta,gamma]")
+        self.structure = Structure(lattice, species_list, frac_coords)
+
+    def create_organism(self, id_generator, composition_space, constraints, random, symmetry_search = False):
+        self.set_seed()
+        #try:
+        cell = self.construct_cell_from_sg(self.species_list, self.sg, self.wp, self.lattice_params)
+        #except:
+            #return None
+        self.cell = self.structure
+        org = SymOrganism(self.cell, id_generator, self.name, composition_space, self.sg, self.wp, self.relative_wp)
+        self.num_made += 1
+        if self.num_made == 10:
+            self.is_finished = True
+        return org
+
+
 class WGANsg:
     def __init__(self, input_file):
         """
@@ -756,7 +1040,8 @@ class WGANsg:
         self.path_to_folder = ' '
         self.files = []
         self.number = len(self.files)
-        self.num_made = 0  # number of attempts (usually number of files given)
+        self.num_made = 0
+        self.max_num_organisms = 0 # number of attempts (usually number of files given)
         self.is_successes_based = False  # it's based on number attempted
         self.is_finished = False
         self.path = None
@@ -835,11 +1120,14 @@ class WGANsg:
                       os.path.isfile(os.path.join(self.path_to_folder, f))]
         self.structures = converted_structures
         self.max_num_organisms = num_images
+
+    
     def train(self, input_file):
         raise NotImplementedError
 
+
     def create_organism(self, id_generator, composition_space, constraints,
-                        random):
+                        random, symmetry_search = False):
         """
         Creates an organism for the initial population from a poscar or cif
         file.
@@ -863,6 +1151,10 @@ class WGANsg:
             and FileOrganismCreator without having to know in advance which one
             it is. Maybe there's a better way to deal with this...
         """
+        if symmetry_search:
+            raise NotImplementedError 
+
+
         if self.num_made == 0:
             self.organism_creator()
         else:
@@ -883,36 +1175,7 @@ class WGANsg:
             print(e)
             self.update_status()
             return None
-        """
-        if self.files[self.num_made - 1].endswith('.cif') or self.files[
-                self.num_made - 1].startswith('POSCAR'):
-            try:
-
-                new_cell = Cell.from_file(
-                os.path.normpath(os.path.join(self.path_to_folder, self.files[self.num_made - 1]))
-                )
-
-                new_org = Organism(new_cell, id_generator, self.name,
-                               composition_space)
-                print('------------------------------------------------------------------------------------------------')
-                print('Making organism {} from file: {} '.format(
-                    new_org.id, self.files[self.num_made - 1]))
-                self.update_status()
-                return new_org
-            except Exception as e:
-                print(e)
-                print('Error reading structure from file: {} '.format(
-                    self.files[self.num_made - 1]))
-                self.update_status()
-                return None
-
-        else:
-            print('File {} has invalid extension - file must end with .cif or '
-                  'begin with POSCAR '.format(self.files[self.num_made - 1]))
-            # added # 06/24/2024
-            self.update_status()
-            return None
-        """
+        
 
     def get_cells(self):
         """
@@ -950,7 +1213,7 @@ class WGANsg:
         self.num_made = self.num_made + 1
         print('Organisms left for {}: {} '.format(
             self.name, self.number - self.num_made))
-        if self.num_made  == len(self.files):
+        if self.num_made  == self.max_num_organisms:
             self.is_finished = True
     def organism_creator(self):
         self.generate(self.input_file)
