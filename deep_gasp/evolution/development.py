@@ -401,43 +401,51 @@ class Developer(object):
         # check the constraints on the number of atoms
         if not self.satisfies_num_atoms_constraints(organism, geometry,
                                                     constraints):
+            print(1)
             return False
 
         # check if the organism is is the composition space
         if not self.is_in_composition_space(organism, geometry,
                                             composition_space,
                                             constraints, pool):
+            print(2)
             return False
         
         #ACH check if the organism is binary and if binary, whether
         #ACH allowed by constraints:
         if not self.is_binary_and_allowed(organism, constraints):
+            print(3)
             return False
 
         # optionally do Niggli cell reduction
         if self.niggli:
             if not self.niggli_reduction(organism, geometry, constraints):
+                print(4)
                 return False
 
         # optionally scale the volume per atom if the organism is unrelaxed
         if self.scale_density and len(
                 pool.promotion_set) > 0 and organism.epa is None:
             if not self.scale_volume(organism, composition_space, pool):
+                print(5)
                 return False
 
         # check the lattice length and angle constraints
         if not self.satisfies_lattice_constraints(organism, geometry,
                                                             constraints):
+            print(6)
             return False
 
         # check the per-species minimum interatomic distance constraints
         if not self.satisfies_mids_constraints(organism, constraints):
+            print(7)
             return False
-
+        
         # check any geometry-specific constraints
         if not self.satisfies_geometry_constraints(organism, geometry):
+            print(8)
             return False
-
+        print(9)
         return True
 
     def satisfies_num_atoms_constraints(self, organism, geometry, constraints):
