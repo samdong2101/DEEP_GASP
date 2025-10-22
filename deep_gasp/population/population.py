@@ -541,6 +541,7 @@ class Pool(object):
                                            composition_space.endpoints)
         # transform the pdentries and put them in a dictionary, with the
         # organism id's as the keys
+        #print(compound_pd.transform_entries([pdentries[org_id]], composition_space.endpoints))
         transformed_pdentries = {}
         for org_id in pdentries:
             transformed_pdentries[org_id] = compound_pd.transform_entries(
@@ -889,7 +890,7 @@ class Pool(object):
 
 
                 line = (
-    f"{'convex hull --':<21}{convex_hull.area:<22.6f}"
+    f"{'convex hull  --':<21}{convex_hull.area:<22.6f}"
     f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
     f"{'average value  --':<18}{average_value:<22.6f}"
     f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
@@ -906,7 +907,7 @@ class Pool(object):
             with open(os.getcwd() + '/convex_hull_data','a') as f:
 
                 line = (
-    f"{'convex hull --':<21}{convex_hull.volume:<22.6f}"
+    f"{'convex hull  --':<21}{convex_hull.volume:<22.6f}"
     f"{'composition  --':<16}{str(self.promotion_set[-1].cell.composition):<22}"
     f"{'average value  --':<18}{average_value:<22.6f}"
     f"{'rate unique comps  --':<22}{(num_comps / len(self.queue)):<22.6f}\n"
