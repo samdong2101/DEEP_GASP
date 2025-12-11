@@ -1266,8 +1266,9 @@ class MatterSimEnergyCalculator:
             ase_struct.calc = self.calculator
             init_relax = self.relaxer_fire.relax(ase_struct,
                                                 steps=500,
-                                                fmax=0.025)
-            relaxed_ase = self.relaxer_bfgs.relax(init_relax[1], steps=500)
+                                                fmax=0.025,
+                                                logfile=None)
+            relaxed_ase = self.relaxer_bfgs.relax(init_relax[1], steps=500, logfile=None)
             dataloader = build_dataloader([relaxed_ase[1]],only_inference = True)
             predictions = self.potential.predict_properties(dataloader,include_forces = False,
                                                             include_stresses = False)
