@@ -121,7 +121,7 @@ class DEEP_GASP():
                                     continue
                                 finally:
                                     signal.alarm(0)
-                                self.log_memory_usage("Inititial population - energy calculation on organism {new_organism.id}")
+                                self.log_memory_usage(f"Inititial population - energy calculation on organism {new_organism.id}")
                                 if relaxed_organism is not None:
                                     self.geometry.unpad(relaxed_organism.cell,
                                         relaxed_organism.n_sub, self.constraints)
@@ -173,7 +173,7 @@ class DEEP_GASP():
                         continue
                     finally:
                         signal.alarm(0)
-                    self.log_memory_usage("Offspring - energy calculation on organism {unrelaxed_offspring.id}")
+                    self.log_memory_usage(f"Offspring - energy calculation on organism {unrelaxed_offspring.id}")
                     if relaxed_offspring is not None:
                         if self.developer.develop(relaxed_offspring,
                                     self.composition_space,
