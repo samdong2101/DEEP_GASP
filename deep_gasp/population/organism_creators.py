@@ -261,7 +261,7 @@ class RandomOrganismCreator:
                               composition_space)
         print('Random organism creator making organism {} '.format(
             random_org.id))
-        #self.update_status()
+        self.update_status()
         return random_org
 
     def make_random_lattice(self, constraints, random):
