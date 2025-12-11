@@ -15,8 +15,8 @@ for population initialization and tournament based scoring/selection (TBS) of ca
 ### Activate the environment
 - ```conda activate deep_gasp```
 
-## 2. Install required packages
-- ```pip install -r requirements.txt```
-
-## 3. Install from source
+## 2. Install from source
 - ```git clone https://github.com/samdong2101/DEEP_GASP.git```
+
+## 3. Install required packages
+- ```pip install -r requirements.txt```
